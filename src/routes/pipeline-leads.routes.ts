@@ -8,7 +8,9 @@ pipelineLeadsRouter.use(requireRole("admin", "sales_head"));
 pipelineLeadsRouter.get("/", async (_req, res) => {
   const leads = await prisma.pipelineLead.findMany({
     orderBy: { createdAt: "desc" },
-    take: 500,
+    // Real imports run into the thousands — this is a generous safety cap,
+    // not a practical page size like the old take: 500 was.
+    take: 20000,
   });
   res.json({ leads });
 });
