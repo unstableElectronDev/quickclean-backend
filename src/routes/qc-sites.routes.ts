@@ -27,14 +27,14 @@ qcSitesRouter.get("/", requireAuth, async (req, res) => {
 
 const qcSiteSchema = z.object({
   siteCode: z.string().min(1).max(20),
-  clientCode: z.string().max(20).nullish(),
+  clientCode: z.string().min(1).max(20),
   siteName: z.string().min(1).max(255),
   state: z.string().min(1).max(100),
   city: z.string().min(1).max(100),
   region: z.enum(REGIONS),
-  parentBrand: z.string().min(1).max(120),
+  parentBrand: z.string().max(120).nullish(),
   brand: z.string().max(120).nullish(),
-  category: z.enum(CATEGORIES),
+  category: z.enum(CATEGORIES).nullish(),
   starCategory: z.number().int().min(1).max(5).nullish(),
   owningCompany: z.string().max(255).nullish(),
   propertyStartDate: z.string().datetime().nullish().or(z.literal("").transform(() => null)),
@@ -42,7 +42,7 @@ const qcSiteSchema = z.object({
   roomBedCount: z.number().int().positive().nullish(),
   status: z.string().max(50).optional(),
   propertyType: z.string().max(50).nullish(),
-  modelType: z.enum(MODEL_TYPES),
+  modelType: z.enum(MODEL_TYPES).nullish(),
 });
 
 qcSitesRouter.post("/", requireRole("admin"), async (req, res) => {
@@ -64,7 +64,7 @@ qcSitesRouter.post("/", requireRole("admin"), async (req, res) => {
     res.status(201).json({ site });
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
-      return res.status(409).json({ error: "A site with this site code already exists" });
+      return res.status(409).json({ error: "A site with this Site Code + Client Code combination already exists" });
     }
     throw err;
   }
@@ -97,7 +97,7 @@ qcSitesRouter.patch("/:id", requireRole("admin"), async (req, res) => {
     res.json({ site });
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
-      return res.status(409).json({ error: "A site with this site code already exists" });
+      return res.status(409).json({ error: "A site with this Site Code + Client Code combination already exists" });
     }
     throw err;
   }

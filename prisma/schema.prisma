@@ -262,28 +262,34 @@ model Property {
 // ---------------------------------------------------------------------------
 
 model QcOperationalSite {
-  id                BigInt       @id @default(autoincrement())
-  siteCode          String       @unique @map("site_code") @db.VarChar(20)
-  clientCode        String?      @map("client_code") @db.VarChar(20)
-  siteName          String       @map("site_name") @db.VarChar(255)
-  state             String       @db.VarChar(100)
-  city              String       @db.VarChar(100)
-  region            Region
-  parentBrand       String       @map("parent_brand") @db.VarChar(120)
-  brand             String?      @db.VarChar(120)
-  category          SiteCategory
-  starCategory      Int?         @map("star_category") @db.UnsignedTinyInt
-  owningCompany     String?      @map("owning_company") @db.VarChar(255)
-  propertyStartDate DateTime?    @map("property_start_date") @db.Date
-  qcOpsStartDate    DateTime?    @map("qc_ops_start_date") @db.Date
-  roomBedCount      Int?         @map("room_bed_count") @db.UnsignedInt
-  status            String       @default("Operational") @db.VarChar(50)
+  id         BigInt @id @default(autoincrement())
+  // NOT globally unique — the same site_code can recur under different
+  // clients (e.g. site_code 1043 for client C104A vs. client C1043B).
+  // The real identity is the (siteCode, clientCode) pair.
+  siteCode   String @map("site_code") @db.VarChar(20)
+  clientCode String @map("client_code") @db.VarChar(20)
+  siteName   String @map("site_name") @db.VarChar(255)
+  state      String @db.VarChar(100)
+  city       String @db.VarChar(100)
+  region     Region
+
+  // Everything below is optional — only site_code, client_code, site_name,
+  // state, city, region are guaranteed present in the real Current Sites file.
+  parentBrand       String?       @map("parent_brand") @db.VarChar(120)
+  brand             String?       @db.VarChar(120)
+  category          SiteCategory?
+  starCategory      Int?          @map("star_category") @db.UnsignedTinyInt
+  owningCompany     String?       @map("owning_company") @db.VarChar(255)
+  propertyStartDate DateTime?     @map("property_start_date") @db.Date
+  qcOpsStartDate    DateTime?     @map("qc_ops_start_date") @db.Date
+  roomBedCount      Int?          @map("room_bed_count") @db.UnsignedInt
+  status            String        @default("Operational") @db.VarChar(50)
   // Free text, not the Resort/Hotel enum — Current Sites spans Healthcare
   // too (hospital/clinic/etc.), so a fixed hospitality enum doesn't fit.
-  propertyType      String?      @map("property_type") @db.VarChar(50)
-  modelType         ModelType    @map("model_type")
-  lat               Decimal?     @db.Decimal(9, 6)
-  lng               Decimal?     @db.Decimal(9, 6)
+  propertyType      String?       @map("property_type") @db.VarChar(50)
+  modelType         ModelType?    @map("model_type")
+  lat               Decimal?      @db.Decimal(9, 6)
+  lng               Decimal?      @db.Decimal(9, 6)
 
   matchedPropertyId BigInt?   @map("matched_property_id")
   matchedProperty   Property? @relation(fields: [matchedPropertyId], references: [id], onDelete: SetNull)
@@ -298,6 +304,7 @@ model QcOperationalSite {
 
   leads Lead[]
 
+  @@unique([siteCode, clientCode])
   @@index([matchedPropertyId])
   @@index([region])
   @@map("qc_operational_sites")

@@ -190,11 +190,16 @@ async function buildReferencePreview(rows: Awaited<ReturnType<typeof parseRefere
 async function buildCurrentSitesPreview(rows: Awaited<ReturnType<typeof parseCurrentSitesFile>>["rows"]) {
   const validRows = rows.filter((r) => r.errors.length === 0 && r.data);
   const siteCodes = validRows.map((r) => r.data!.siteCode);
+  // site_code alone isn't unique (same code can recur for different
+  // clients) — prefilter by siteCode, then match the exact pair in JS.
   const existing = siteCodes.length
-    ? await prisma.qcOperationalSite.findMany({ where: { siteCode: { in: siteCodes } }, select: { siteCode: true } })
+    ? await prisma.qcOperationalSite.findMany({
+        where: { siteCode: { in: siteCodes } },
+        select: { siteCode: true, clientCode: true },
+      })
     : [];
-  const existingCodes = new Set(existing.map((e) => e.siteCode));
-  const updateCount = validRows.filter((r) => existingCodes.has(r.data!.siteCode)).length;
+  const existingKeys = new Set(existing.map((e) => `${e.siteCode}:${e.clientCode}`));
+  const updateCount = validRows.filter((r) => existingKeys.has(`${r.data!.siteCode}:${r.data!.clientCode}`)).length;
 
   return {
     totalRows: rows.length,
@@ -326,10 +331,11 @@ uploadsRouter.post("/:id/commit", async (req, res) => {
           for (const row of pending.rows) {
             if (row.errors.length > 0 || !row.data) continue;
             const data = row.data;
-            const existing = await tx.qcOperationalSite.findUnique({ where: { siteCode: data.siteCode } });
+            const existing = await tx.qcOperationalSite.findUnique({
+              where: { siteCode_clientCode: { siteCode: data.siteCode, clientCode: data.clientCode } },
+            });
 
             const fields = {
-              clientCode: data.clientCode,
               siteName: data.siteName,
               state: data.state,
               city: data.city,
@@ -351,7 +357,7 @@ uploadsRouter.post("/:id/commit", async (req, res) => {
               updated += 1;
             } else {
               await tx.qcOperationalSite.create({
-                data: { ...fields, siteCode: data.siteCode, createdById: userId },
+                data: { ...fields, siteCode: data.siteCode, clientCode: data.clientCode, createdById: userId },
               });
               created += 1;
             }

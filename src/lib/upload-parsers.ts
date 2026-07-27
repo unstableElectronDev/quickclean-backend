@@ -308,28 +308,30 @@ const CURRENT_SITES_HEADER_MAP: Record<string, string> = {
 
 export type CurrentSiteRowData = {
   siteCode: string;
-  clientCode: string | null;
+  clientCode: string;
   siteName: string;
   state: string;
   city: string;
   region: (typeof REGIONS)[number];
-  parentBrand: string;
+  parentBrand: string | null;
   brand: string | null;
-  category: (typeof SITE_CATEGORIES)[number];
+  category: (typeof SITE_CATEGORIES)[number] | null;
   starCategory: number | null;
   owningCompany: string | null;
   propertyStartDate: Date | null;
   qcOpsStartDate: Date | null;
   roomBedCount: number | null;
   propertyType: string | null;
-  modelType: (typeof MODEL_TYPES)[number];
+  modelType: (typeof MODEL_TYPES)[number] | null;
 };
 
 export function parseCurrentSitesFile(buffer: Buffer): { rows: ParsedRow<CurrentSiteRowData>[] } {
   const { headerRow, dataRows } = readFirstSheet(buffer);
   const headerMap = mapHeaders(headerRow, CURRENT_SITES_HEADER_MAP);
   const rows: ParsedRow<CurrentSiteRowData>[] = [];
-  const seenSiteCodes = new Set<string>();
+  // The same site_code can recur for different clients (e.g. site_code 1043
+  // for client C104A vs. client C1043B) — the real identity is the pair.
+  const seenKeys = new Set<string>();
 
   dataRows.forEach((row, i) => {
     const rowNumber = i + 2;
@@ -340,9 +342,14 @@ export function parseCurrentSitesFile(buffer: Buffer): { rows: ParsedRow<Current
 
     const siteCode = cellToString(fields.siteCode);
     if (!siteCode) errors.push("Site Code is required");
-    if (siteCode) {
-      if (seenSiteCodes.has(siteCode)) errors.push(`Duplicate Site Code ${siteCode} within this file`);
-      seenSiteCodes.add(siteCode);
+
+    const clientCode = cellToString(fields.clientCode);
+    if (!clientCode) errors.push("Client Code is required");
+
+    if (siteCode && clientCode) {
+      const key = `${siteCode}:${clientCode}`;
+      if (seenKeys.has(key)) errors.push(`Duplicate Site Code + Client Code (${siteCode} / ${clientCode}) within this file`);
+      seenKeys.add(key);
     }
 
     const siteName = cellToString(fields.siteName);
@@ -357,14 +364,10 @@ export function parseCurrentSitesFile(buffer: Buffer): { rows: ParsedRow<Current
     const region = normalizeEnum(cellToString(fields.region), REGIONS);
     if (!region) errors.push("Region must be one of North/South/East/West/Central");
 
+    // Everything below is optional in the real file.
     const parentBrand = cellToString(fields.parentBrand);
-    if (!parentBrand) errors.push("Parent Brand is required");
-
     const category = normalizeEnum(cellToString(fields.category), SITE_CATEGORIES);
-    if (!category) errors.push("Category must be Healthcare or Hospitality");
-
     const modelType = normalizeEnum(cellToString(fields.modelType), MODEL_TYPES);
-    if (!modelType) errors.push("Model Type must be OPL, Outsourcing, or Rental");
 
     const starCategory = cellToNumber(fields.starCategory);
     if (starCategory !== null && (!Number.isInteger(starCategory) || starCategory < 1 || starCategory > 5)) {
@@ -383,21 +386,21 @@ export function parseCurrentSitesFile(buffer: Buffer): { rows: ParsedRow<Current
         errors.length === 0
           ? {
               siteCode: siteCode!,
-              clientCode: cellToString(fields.clientCode),
+              clientCode: clientCode!,
               siteName: siteName!,
               state: state!,
               city: city!,
               region: region!,
-              parentBrand: parentBrand!,
+              parentBrand,
               brand: cellToString(fields.brand),
-              category: category!,
+              category,
               starCategory,
               owningCompany: cellToString(fields.owningCompany),
               propertyStartDate: cellToDate(fields.propertyStartDate),
               qcOpsStartDate: cellToDate(fields.qcOpsStartDate),
               roomBedCount,
               propertyType: cellToString(fields.propertyType),
-              modelType: modelType!,
+              modelType,
             }
           : null,
     });
