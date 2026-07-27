@@ -83,67 +83,57 @@ function isBlankRow(fields: Record<string, unknown>): boolean {
 
 const HEADER_SCAN_LIMIT = 15;
 
-function scoreRow(row: unknown[], headerMap: Record<string, string>): number {
-  return row.reduce<number>((acc, cell) => {
-    if (typeof cell !== "string") return acc;
-    return headerMap[normalizeHeader(cell)] ? acc + 1 : acc;
-  }, 0);
+/**
+ * Real exported spreadsheets often have a title/banner row (or a blank row)
+ * above the actual column headers. Scanning blindly assumes row 1 is the
+ * header, which silently produces zero rows if that assumption is wrong —
+ * every "data" row gets read against the wrong header and dropped as blank.
+ * Instead, scan the first few rows and pick whichever one matches the most
+ * columns from this file type's known header dictionary.
+ */
+function findHeaderRowIndex(grid: unknown[][], headerMap: Record<string, string>): number {
+  let bestIndex = -1;
+  let bestScore = 0;
+  const scanLimit = Math.min(grid.length, HEADER_SCAN_LIMIT);
+
+  for (let i = 0; i < scanLimit; i++) {
+    const row = grid[i];
+    const score = row.reduce<number>((acc, cell) => {
+      if (typeof cell !== "string") return acc;
+      return headerMap[normalizeHeader(cell)] ? acc + 1 : acc;
+    }, 0);
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = i;
+    }
+  }
+
+  if (bestIndex === -1) {
+    const firstRowPreview = (grid[0] ?? [])
+      .map((c) => cellToString(c))
+      .filter((c): c is string => c !== null)
+      .join(", ");
+    throw new Error(
+      `Could not find a recognizable header row in this file (checked the first ${scanLimit} rows). ` +
+        `First row found: "${firstRowPreview || "(blank)"}". Check you picked the right file type.`
+    );
+  }
+
+  return bestIndex;
 }
 
-/**
- * Real workbooks are messy in two ways this has to handle:
- *  - a title/banner row (or a blank row) above the actual column headers on
- *    the right sheet
- *  - the right sheet not being the first one (e.g. a pivot/summary tab first,
- *    then a "Raw Data" tab with the actual per-row records)
- * Scanning only row 1 of only sheet 1 silently produces zero rows when either
- * assumption is wrong — every "data" row gets read against the wrong header
- * and dropped as blank, with no error. Instead, scan every sheet's first few
- * rows and pick whichever (sheet, row) matches the most columns from this
- * file type's known header dictionary.
- */
+/** Reads the first sheet, auto-detecting which row is the real header. */
 function readSheet(
   buffer: Buffer,
   headerMap: Record<string, string>
 ): { headerRow: unknown[]; dataRows: unknown[][]; headerRowIndex: number } {
   const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
-  if (workbook.SheetNames.length === 0) throw new Error("This file has no sheets");
-
-  let best: { grid: unknown[][]; rowIndex: number; score: number; sheetName: string } | null = null;
-
-  for (const sheetName of workbook.SheetNames) {
-    const grid = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[sheetName], { header: 1, blankrows: false });
-    const scanLimit = Math.min(grid.length, HEADER_SCAN_LIMIT);
-    for (let i = 0; i < scanLimit; i++) {
-      const score = scoreRow(grid[i], headerMap);
-      if (!best || score > best.score) {
-        best = { grid, rowIndex: i, score, sheetName };
-      }
-    }
-  }
-
-  if (!best || best.score === 0) {
-    const firstSheetGrid = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[workbook.SheetNames[0]], {
-      header: 1,
-      blankrows: false,
-    });
-    const firstRowPreview = (firstSheetGrid[0] ?? [])
-      .map((c) => cellToString(c))
-      .filter((c): c is string => c !== null)
-      .join(", ");
-    throw new Error(
-      `Could not find a recognizable header row in any sheet of this file ` +
-        `(checked sheets: ${workbook.SheetNames.join(", ")}). ` +
-        `First row of "${workbook.SheetNames[0]}": "${firstRowPreview || "(blank)"}". ` +
-        `Check you picked the right file type, and that the sheet with per-row data — not a pivot/summary tab — is included.`
-    );
-  }
-
-  return {
-    headerRow: best.grid[best.rowIndex],
-    dataRows: best.grid.slice(best.rowIndex + 1),
-    headerRowIndex: best.rowIndex,
-  };
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) throw new Error("This file has no sheets");
+  const sheet = workbook.Sheets[sheetName];
+  const grid = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, blankrows: false });
+  const headerRowIndex = findHeaderRowIndex(grid, headerMap);
+  return { headerRow: grid[headerRowIndex], dataRows: grid.slice(headerRowIndex + 1), headerRowIndex };
 }
 
 function extractFields(row: unknown[], headerMap: Record<number, string>): Record<string, unknown> {
