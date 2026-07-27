@@ -5,6 +5,9 @@ import cors from "cors";
 import { attachSession } from "./middleware/auth";
 import { authRouter } from "./routes/auth.routes";
 import { usersRouter } from "./routes/users.routes";
+import { brandsRouter } from "./routes/brands.routes";
+import { uploadsRouter } from "./routes/uploads.routes";
+import { qcSitesRouter } from "./routes/qc-sites.routes";
 
 const app = express();
 
@@ -22,6 +25,14 @@ app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
 app.use("/api/auth", authRouter);
 app.use("/api/users", usersRouter);
+app.use("/api/brands", brandsRouter);
+app.use("/api/uploads", uploadsRouter);
+app.use("/api/qc-sites", qcSitesRouter);
+
+app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error(err);
+  res.status(500).json({ error: "Internal server error" });
+});
 
 const port = Number(process.env.PORT ?? 4001);
 app.listen(port, () => {

@@ -244,6 +244,7 @@ model Property {
   qcSitesMatched QcOperationalSite[]
   leads          Lead[]
 
+  @@unique([brandId, srNo])
   @@index([brandId])
   @@index([uploadId])
   @@index([region])
