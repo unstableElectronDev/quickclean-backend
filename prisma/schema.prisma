@@ -1,0 +1,401 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  admin
+  sales_head
+  executive
+}
+
+enum UserStatus {
+  invited
+  active
+  deactivated
+}
+
+enum PropertyType {
+  Resort
+  Hotel
+}
+
+enum Region {
+  North
+  South
+  East
+  West
+  Central
+}
+
+enum DevelopmentType {
+  Brownfield
+  Greenfield
+}
+
+enum OperatedBy {
+  Client
+  QuickClean
+}
+
+enum SiteCategory {
+  Healthcare
+  Hospitality
+}
+
+enum ModelType {
+  OPL
+  Outsourcing
+  Rental
+}
+
+enum LeadStatus {
+  new
+  contacted
+  converted
+  rejected
+}
+
+enum UploadType {
+  TAM
+}
+
+enum UploadStatus {
+  previewed
+  committed
+  failed
+}
+
+enum ArchiveSheetName {
+  QC_Average      @map("QC Average")
+  IHCL_Average    @map("IHCL Average")
+  Data_Validation @map("Data Validation")
+}
+
+// ---------------------------------------------------------------------------
+// 1. users
+// ---------------------------------------------------------------------------
+
+model User {
+  id              BigInt     @id @default(autoincrement())
+  name            String     @db.VarChar(120)
+  email           String     @unique @db.VarChar(160)
+  passwordHash    String?    @map("password_hash") @db.VarChar(255)
+  role            UserRole
+  status          UserStatus @default(invited)
+  inviteToken     String?    @map("invite_token") @db.VarChar(255)
+  inviteExpiresAt DateTime?  @map("invite_expires_at")
+
+  createdById BigInt? @map("created_by")
+  updatedById BigInt? @map("updated_by")
+  createdBy   User?   @relation("UserCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy   User?   @relation("UserUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // reverse relations
+  usersCreated                 User[]                   @relation("UserCreatedBy")
+  usersUpdated                 User[]                   @relation("UserUpdatedBy")
+  brandsCreated                Brand[]                  @relation("BrandCreatedBy")
+  brandsUpdated                Brand[]                  @relation("BrandUpdatedBy")
+  roomLoadBenchmarksCreated    RoomLoadBenchmark[]      @relation("RoomLoadBenchmarkCreatedBy")
+  roomLoadBenchmarksUpdated    RoomLoadBenchmark[]      @relation("RoomLoadBenchmarkUpdatedBy")
+  clientGroupBenchmarksCreated ClientGroupBenchmark[]   @relation("ClientGroupBenchmarkCreatedBy")
+  clientGroupBenchmarksUpdated ClientGroupBenchmark[]   @relation("ClientGroupBenchmarkUpdatedBy")
+  propertiesCreated            Property[]               @relation("PropertyCreatedBy")
+  propertiesUpdated            Property[]               @relation("PropertyUpdatedBy")
+  qcSitesCreated               QcOperationalSite[]      @relation("QcSiteCreatedBy")
+  qcSitesUpdated               QcOperationalSite[]      @relation("QcSiteUpdatedBy")
+  leadsCreated                 Lead[]                   @relation("LeadCreatedBy")
+  leadsUpdated                 Lead[]                   @relation("LeadUpdatedBy")
+  leadsAssigned                Lead[]                   @relation("LeadAssignedTo")
+  uploadsCreated               Upload[]                 @relation("UploadCreatedBy")
+  uploadsUpdated               Upload[]                 @relation("UploadUpdatedBy")
+  archiveRowsCreated           UploadReferenceArchive[] @relation("ArchiveCreatedBy")
+  auditLogEntries              AuditLog[]
+
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// 2. brands
+// ---------------------------------------------------------------------------
+
+model Brand {
+  id          BigInt  @id @default(autoincrement())
+  name        String  @db.VarChar(120)
+  parentGroup String  @map("parent_group") @db.VarChar(100)
+  logoUrl     String? @map("logo_url") @db.VarChar(255)
+
+  createdById BigInt? @map("created_by")
+  updatedById BigInt? @map("updated_by")
+  createdBy   User?   @relation("BrandCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy   User?   @relation("BrandUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  properties Property[]
+  uploads    Upload[]
+
+  @@map("brands")
+}
+
+// ---------------------------------------------------------------------------
+// 3. room_load_benchmarks
+// ---------------------------------------------------------------------------
+
+model RoomLoadBenchmark {
+  id            BigInt       @id @default(autoincrement())
+  parentGroup   String       @default("GLOBAL") @map("parent_group") @db.VarChar(100)
+  starCategory  Int          @map("star_category") @db.UnsignedTinyInt
+  propertyType  PropertyType @map("property_type")
+  perRoomLoadKg Decimal      @map("per_room_load_kg") @db.Decimal(6, 2)
+
+  createdById BigInt? @map("created_by")
+  updatedById BigInt? @map("updated_by")
+  createdBy   User?   @relation("RoomLoadBenchmarkCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy   User?   @relation("RoomLoadBenchmarkUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([parentGroup, starCategory, propertyType])
+  @@map("room_load_benchmarks")
+}
+
+// ---------------------------------------------------------------------------
+// 4. client_group_benchmarks
+// ---------------------------------------------------------------------------
+
+model ClientGroupBenchmark {
+  id          BigInt @id @default(autoincrement())
+  parentGroup String @unique @map("parent_group") @db.VarChar(100)
+
+  avgOccupancy             Decimal @map("avg_occupancy") @db.Decimal(5, 2)
+  clientWaterRateKlPerKg   Decimal @map("client_water_rate_kl_per_kg") @db.Decimal(6, 4)
+  clientEnergyRateKwhPerKg Decimal @map("client_energy_rate_kwh_per_kg") @db.Decimal(6, 4)
+  clientCostPerKg          Decimal @map("client_cost_per_kg") @db.Decimal(8, 2)
+  qcWaterRateKlPerKg       Decimal @map("qc_water_rate_kl_per_kg") @db.Decimal(6, 4)
+  qcEnergyRateKwhPerKg     Decimal @map("qc_energy_rate_kwh_per_kg") @db.Decimal(6, 4)
+  qcPricePerKg             Decimal @map("qc_price_per_kg") @db.Decimal(8, 2)
+  oplThresholdLoadDay      Decimal @map("opl_threshold_load_day") @db.Decimal(8, 2)
+  oplThresholdLoadMonth    Decimal @map("opl_threshold_load_month") @db.Decimal(10, 2)
+  linenWastePerRoomKgYr    Decimal @map("linen_waste_per_room_kg_yr") @db.Decimal(6, 2)
+  co2eFactorPerKgLinen     Decimal @map("co2e_factor_per_kg_linen") @db.Decimal(6, 4)
+  kgCo2PerTree             Decimal @map("kg_co2_per_tree") @db.Decimal(6, 2)
+
+  createdById BigInt? @map("created_by")
+  updatedById BigInt? @map("updated_by")
+  createdBy   User?   @relation("ClientGroupBenchmarkCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy   User?   @relation("ClientGroupBenchmarkUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("client_group_benchmarks")
+}
+
+// ---------------------------------------------------------------------------
+// 5. properties  (TAM data, file upload only)
+// ---------------------------------------------------------------------------
+
+model Property {
+  id      BigInt @id @default(autoincrement())
+  brandId BigInt @map("brand_id")
+  brand   Brand  @relation(fields: [brandId], references: [id], onDelete: Restrict)
+
+  uploadId BigInt? @map("upload_id")
+  upload   Upload? @relation(fields: [uploadId], references: [id], onDelete: SetNull)
+
+  srNo            Int?
+  name            String          @db.VarChar(255)
+  region          Region
+  state           String          @db.VarChar(100)
+  city            String          @db.VarChar(100)
+  propertyType    PropertyType    @map("property_type")
+  developmentType DevelopmentType @map("development_type")
+  operatedBy      OperatedBy      @map("operated_by")
+  starCategory    Int             @map("star_category") @db.UnsignedTinyInt
+  roomCount       Int             @map("room_count") @db.UnsignedInt
+  openingYear     Int?            @map("opening_year") @db.UnsignedSmallInt
+  capexDeployed   Decimal         @default(0) @map("capex_deployed") @db.Decimal(12, 2)
+  sourceUrl       String?         @map("source_url") @db.VarChar(500)
+  lat             Decimal?        @db.Decimal(9, 6)
+  lng             Decimal?        @db.Decimal(9, 6)
+
+  createdById BigInt? @map("created_by")
+  updatedById BigInt? @map("updated_by")
+  createdBy   User?   @relation("PropertyCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy   User?   @relation("PropertyUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  qcSitesMatched QcOperationalSite[]
+  leads          Lead[]
+
+  @@index([brandId])
+  @@index([uploadId])
+  @@index([region])
+  @@map("properties")
+}
+
+// ---------------------------------------------------------------------------
+// 6. qc_operational_sites  (form entry, whole-company registry)
+// ---------------------------------------------------------------------------
+
+model QcOperationalSite {
+  id                BigInt       @id @default(autoincrement())
+  siteCode          String       @unique @map("site_code") @db.VarChar(20)
+  clientCode        String?      @map("client_code") @db.VarChar(20)
+  siteName          String       @map("site_name") @db.VarChar(255)
+  state             String       @db.VarChar(100)
+  city              String       @db.VarChar(100)
+  region            Region
+  parentBrand       String       @map("parent_brand") @db.VarChar(120)
+  brand             String?      @db.VarChar(120)
+  category          SiteCategory
+  starCategory      Int?         @map("star_category") @db.UnsignedTinyInt
+  owningCompany     String?      @map("owning_company") @db.VarChar(255)
+  propertyStartDate DateTime?    @map("property_start_date") @db.Date
+  qcOpsStartDate    DateTime?    @map("qc_ops_start_date") @db.Date
+  roomBedCount      Int?         @map("room_bed_count") @db.UnsignedInt
+  status            String       @default("Operational") @db.VarChar(50)
+  modelType         ModelType    @map("model_type")
+  lat               Decimal?     @db.Decimal(9, 6)
+  lng               Decimal?     @db.Decimal(9, 6)
+
+  matchedPropertyId BigInt?   @map("matched_property_id")
+  matchedProperty   Property? @relation(fields: [matchedPropertyId], references: [id], onDelete: SetNull)
+
+  createdById BigInt  @map("created_by")
+  createdBy   User    @relation("QcSiteCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedById BigInt? @map("updated_by")
+  updatedBy   User?   @relation("QcSiteUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  leads Lead[]
+
+  @@index([matchedPropertyId])
+  @@index([region])
+  @@map("qc_operational_sites")
+}
+
+// ---------------------------------------------------------------------------
+// 7. leads  (property x QC site match)
+// ---------------------------------------------------------------------------
+
+model Lead {
+  id BigInt @id @default(autoincrement())
+
+  propertyId BigInt   @map("property_id")
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  qcSiteId BigInt            @map("qc_site_id")
+  qcSite   QcOperationalSite @relation(fields: [qcSiteId], references: [id], onDelete: Cascade)
+
+  distanceKm Decimal    @map("distance_km") @db.Decimal(6, 2)
+  status     LeadStatus @default(new)
+
+  assignedToId BigInt? @map("assigned_to")
+  assignedTo   User?   @relation("LeadAssignedTo", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  notes String? @db.Text
+
+  createdById BigInt? @map("created_by")
+  updatedById BigInt? @map("updated_by")
+  createdBy   User?   @relation("LeadCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy   User?   @relation("LeadUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([propertyId, qcSiteId])
+  @@index([qcSiteId])
+  @@index([status])
+  @@map("leads")
+}
+
+// ---------------------------------------------------------------------------
+// 8. uploads  (TAM files only)
+// ---------------------------------------------------------------------------
+
+model Upload {
+  id       BigInt       @id @default(autoincrement())
+  brandId  BigInt       @map("brand_id")
+  brand    Brand        @relation(fields: [brandId], references: [id], onDelete: Restrict)
+  type     UploadType   @default(TAM)
+  filename String       @db.VarChar(255)
+  rowCount Int?         @map("row_count") @db.UnsignedInt
+  status   UploadStatus @default(previewed)
+
+  createdById BigInt  @map("created_by")
+  createdBy   User    @relation("UploadCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedById BigInt? @map("updated_by")
+  updatedBy   User?   @relation("UploadUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  properties    Property[]
+  referenceRows UploadReferenceArchive[]
+
+  @@map("uploads")
+}
+
+// ---------------------------------------------------------------------------
+// 9. upload_reference_archive
+// ---------------------------------------------------------------------------
+
+model UploadReferenceArchive {
+  id BigInt @id @default(autoincrement())
+
+  uploadId BigInt @map("upload_id")
+  upload   Upload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+
+  sheetName ArchiveSheetName @map("sheet_name")
+  srNo      Int?             @map("sr_no")
+  rawRow    Json             @map("raw_row")
+
+  createdById BigInt? @map("created_by")
+  createdBy   User?   @relation("ArchiveCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([uploadId])
+  @@map("upload_reference_archive")
+}
+
+// ---------------------------------------------------------------------------
+// 10. audit_log
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id BigInt @id @default(autoincrement())
+
+  userId BigInt? @map("user_id")
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  action   String @db.VarChar(100)
+  entity   String @db.VarChar(50)
+  entityId BigInt @map("entity_id")
+  meta     Json?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([entity, entityId])
+  @@map("audit_log")
+}
