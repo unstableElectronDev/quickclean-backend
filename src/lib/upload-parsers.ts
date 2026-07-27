@@ -515,8 +515,8 @@ export function parsePipelineLeadsFile(buffer: Buffer): { rows: ParsedRow<Pipeli
     }
 
     const keysOrBeds = cellToNumber(fields.keysOrBeds);
-    if (keysOrBeds !== null && (!Number.isInteger(keysOrBeds) || keysOrBeds <= 0)) {
-      errors.push("No Of Keys / No of Beds must be a positive integer");
+    if (keysOrBeds !== null && (!Number.isInteger(keysOrBeds) || keysOrBeds < 0)) {
+      errors.push("No Of Keys / No of Beds must be a non-negative integer");
     }
 
     // Region is informational here — an unrecognized value is dropped, not
