@@ -81,15 +81,59 @@ function isBlankRow(fields: Record<string, unknown>): boolean {
   return Object.keys(fields).length === 0 || Object.values(fields).every((v) => cellToString(v) === null);
 }
 
-/** Reads the first sheet of the workbook as a header row + data rows. */
-function readFirstSheet(buffer: Buffer): { headerRow: unknown[]; dataRows: unknown[][] } {
+const HEADER_SCAN_LIMIT = 15;
+
+/**
+ * Real exported spreadsheets often have a title/banner row (or a blank row)
+ * above the actual column headers. Scanning blindly assumes row 1 is the
+ * header, which silently produces zero rows if that assumption is wrong —
+ * every "data" row gets read against the wrong header and dropped as blank.
+ * Instead, scan the first few rows and pick whichever one matches the most
+ * columns from this file type's known header dictionary.
+ */
+function findHeaderRowIndex(grid: unknown[][], headerMap: Record<string, string>): number {
+  let bestIndex = -1;
+  let bestScore = 0;
+  const scanLimit = Math.min(grid.length, HEADER_SCAN_LIMIT);
+
+  for (let i = 0; i < scanLimit; i++) {
+    const row = grid[i];
+    const score = row.reduce<number>((acc, cell) => {
+      if (typeof cell !== "string") return acc;
+      return headerMap[normalizeHeader(cell)] ? acc + 1 : acc;
+    }, 0);
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = i;
+    }
+  }
+
+  if (bestIndex === -1) {
+    const firstRowPreview = (grid[0] ?? [])
+      .map((c) => cellToString(c))
+      .filter((c): c is string => c !== null)
+      .join(", ");
+    throw new Error(
+      `Could not find a recognizable header row in this file (checked the first ${scanLimit} rows). ` +
+        `First row found: "${firstRowPreview || "(blank)"}". Check you picked the right file type.`
+    );
+  }
+
+  return bestIndex;
+}
+
+/** Reads the first sheet, auto-detecting which row is the real header. */
+function readSheet(
+  buffer: Buffer,
+  headerMap: Record<string, string>
+): { headerRow: unknown[]; dataRows: unknown[][]; headerRowIndex: number } {
   const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
   const sheetName = workbook.SheetNames[0];
-  if (!sheetName) return { headerRow: [], dataRows: [] };
+  if (!sheetName) throw new Error("This file has no sheets");
   const sheet = workbook.Sheets[sheetName];
   const grid = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, blankrows: false });
-  const [headerRow, ...dataRows] = grid;
-  return { headerRow: headerRow ?? [], dataRows };
+  const headerRowIndex = findHeaderRowIndex(grid, headerMap);
+  return { headerRow: grid[headerRowIndex], dataRows: grid.slice(headerRowIndex + 1), headerRowIndex };
 }
 
 function extractFields(row: unknown[], headerMap: Record<number, string>): Record<string, unknown> {
@@ -140,13 +184,13 @@ export type PropertyRowData = {
 };
 
 export function parsePropertiesFile(buffer: Buffer): { rows: ParsedRow<PropertyRowData>[] } {
-  const { headerRow, dataRows } = readFirstSheet(buffer);
+  const { headerRow, dataRows, headerRowIndex } = readSheet(buffer, PROPERTIES_HEADER_MAP);
   const headerMap = mapHeaders(headerRow, PROPERTIES_HEADER_MAP);
   const rows: ParsedRow<PropertyRowData>[] = [];
   const seenSrNo = new Set<number>();
 
   dataRows.forEach((row, i) => {
-    const rowNumber = i + 2;
+    const rowNumber = headerRowIndex + i + 2;
     const fields = extractFields(row, headerMap);
     if (isBlankRow(fields)) return;
 
@@ -257,13 +301,13 @@ export type ReferenceRowData = {
 };
 
 export function parseReferenceFile(buffer: Buffer): { rows: ParsedRow<ReferenceRowData>[] } {
-  const { headerRow, dataRows } = readFirstSheet(buffer);
+  const { headerRow, dataRows, headerRowIndex } = readSheet(buffer, REFERENCE_HEADER_MAP);
   const headerMap = mapHeaders(headerRow, REFERENCE_HEADER_MAP);
   const rawHeaders = headerRow.map((h) => cellToString(h) ?? "");
   const rows: ParsedRow<ReferenceRowData>[] = [];
 
   dataRows.forEach((row, i) => {
-    const rowNumber = i + 2;
+    const rowNumber = headerRowIndex + i + 2;
     const raw: Record<string, unknown> = {};
     rawHeaders.forEach((h, idx) => {
       if (h) raw[h] = row[idx] ?? null;
@@ -326,7 +370,7 @@ export type CurrentSiteRowData = {
 };
 
 export function parseCurrentSitesFile(buffer: Buffer): { rows: ParsedRow<CurrentSiteRowData>[] } {
-  const { headerRow, dataRows } = readFirstSheet(buffer);
+  const { headerRow, dataRows, headerRowIndex } = readSheet(buffer, CURRENT_SITES_HEADER_MAP);
   const headerMap = mapHeaders(headerRow, CURRENT_SITES_HEADER_MAP);
   const rows: ParsedRow<CurrentSiteRowData>[] = [];
   // The same site_code can recur for different clients (e.g. site_code 1043
@@ -334,7 +378,7 @@ export function parseCurrentSitesFile(buffer: Buffer): { rows: ParsedRow<Current
   const seenKeys = new Set<string>();
 
   dataRows.forEach((row, i) => {
-    const rowNumber = i + 2;
+    const rowNumber = headerRowIndex + i + 2;
     const fields = extractFields(row, headerMap);
     if (isBlankRow(fields)) return;
 
@@ -451,12 +495,12 @@ export type PipelineLeadRowData = {
 };
 
 export function parsePipelineLeadsFile(buffer: Buffer): { rows: ParsedRow<PipelineLeadRowData>[] } {
-  const { headerRow, dataRows } = readFirstSheet(buffer);
+  const { headerRow, dataRows, headerRowIndex } = readSheet(buffer, PIPELINE_LEADS_HEADER_MAP);
   const headerMap = mapHeaders(headerRow, PIPELINE_LEADS_HEADER_MAP);
   const rows: ParsedRow<PipelineLeadRowData>[] = [];
 
   dataRows.forEach((row, i) => {
-    const rowNumber = i + 2;
+    const rowNumber = headerRowIndex + i + 2;
     const fields = extractFields(row, headerMap);
     if (isBlankRow(fields)) return;
 

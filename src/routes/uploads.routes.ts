@@ -99,8 +99,9 @@ uploadsRouter.post("/", upload.single("file"), async (req, res) => {
         break;
       }
     }
-  } catch {
-    return res.status(400).json({ error: "Could not read this file — is it a valid CSV/XLSX?" });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Could not read this file — is it a valid CSV/XLSX?";
+    return res.status(400).json({ error: message });
   }
 
   const uploadRow = await prisma.upload.create({
