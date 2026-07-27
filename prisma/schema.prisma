@@ -65,7 +65,12 @@ enum LeadStatus {
 }
 
 enum UploadType {
-  TAM
+  CURRENT_SITES
+  PROPERTIES
+  QC_AVERAGE
+  BRAND_AVERAGE
+  DATA_VALIDATION
+  LEADS_PIPELINE
 }
 
 enum UploadStatus {
@@ -76,7 +81,7 @@ enum UploadStatus {
 
 enum ArchiveSheetName {
   QC_Average      @map("QC Average")
-  IHCL_Average    @map("IHCL Average")
+  Brand_Average   @map("Brand Average")
   Data_Validation @map("Data Validation")
 }
 
@@ -121,6 +126,7 @@ model User {
   uploadsCreated               Upload[]                 @relation("UploadCreatedBy")
   uploadsUpdated               Upload[]                 @relation("UploadUpdatedBy")
   archiveRowsCreated           UploadReferenceArchive[] @relation("ArchiveCreatedBy")
+  pipelineLeadsCreated         PipelineLead[]           @relation("PipelineLeadCreatedBy")
   auditLogEntries              AuditLog[]
 
   @@map("users")
@@ -272,6 +278,9 @@ model QcOperationalSite {
   qcOpsStartDate    DateTime?    @map("qc_ops_start_date") @db.Date
   roomBedCount      Int?         @map("room_bed_count") @db.UnsignedInt
   status            String       @default("Operational") @db.VarChar(50)
+  // Free text, not the Resort/Hotel enum — Current Sites spans Healthcare
+  // too (hospital/clinic/etc.), so a fixed hospitality enum doesn't fit.
+  propertyType      String?      @map("property_type") @db.VarChar(50)
   modelType         ModelType    @map("model_type")
   lat               Decimal?     @db.Decimal(9, 6)
   lng               Decimal?     @db.Decimal(9, 6)
@@ -330,17 +339,61 @@ model Lead {
 }
 
 // ---------------------------------------------------------------------------
-// 8. uploads  (TAM files only)
+// 7b. pipeline_leads  (CRM-style sales pipeline import — not in the original
+// design doc; added for the "Leads in Pipeline File" upload type. Distinct
+// from `leads` above, which is the system-generated QC-site-to-property
+// proximity match, not an external sales pipeline record.)
+// ---------------------------------------------------------------------------
+
+model PipelineLead {
+  id BigInt @id @default(autoincrement())
+
+  uploadId BigInt? @map("upload_id")
+  upload   Upload? @relation(fields: [uploadId], references: [id], onDelete: SetNull)
+
+  fullName          String   @map("full_name") @db.VarChar(255)
+  category          String?  @db.VarChar(100)
+  city              String?  @db.VarChar(100)
+  state             String?  @db.VarChar(100)
+  region            Region?
+  keysOrBeds        Int?     @map("keys_or_beds")
+  leadCreator       String?  @map("lead_creator") @db.VarChar(120)
+  leadOwner         String?  @map("lead_owner") @db.VarChar(120)
+  regionalSalesLead String?  @map("regional_sales_lead") @db.VarChar(120)
+  industry          String?  @db.VarChar(120)
+  leadQualification String?  @map("lead_qualification") @db.VarChar(100)
+  leadType          String?  @map("lead_type") @db.VarChar(100)
+  leadStatus        String?  @map("lead_status") @db.VarChar(100)
+  propertyType      String?  @map("property_type") @db.VarChar(100)
+  estimatedRevenue  Decimal? @map("estimated_revenue") @db.Decimal(14, 2)
+
+  createdById BigInt? @map("created_by")
+  createdBy   User?   @relation("PipelineLeadCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([uploadId])
+  @@map("pipeline_leads")
+}
+
+// ---------------------------------------------------------------------------
+// 8. uploads
 // ---------------------------------------------------------------------------
 
 model Upload {
-  id       BigInt       @id @default(autoincrement())
-  brandId  BigInt       @map("brand_id")
-  brand    Brand        @relation(fields: [brandId], references: [id], onDelete: Restrict)
-  type     UploadType   @default(TAM)
-  filename String       @db.VarChar(255)
-  rowCount Int?         @map("row_count") @db.UnsignedInt
-  status   UploadStatus @default(previewed)
+  id      BigInt  @id @default(autoincrement())
+  brandId BigInt? @map("brand_id")
+  brand   Brand?  @relation(fields: [brandId], references: [id], onDelete: SetNull)
+
+  // Set for PROPERTIES / QC_AVERAGE / BRAND_AVERAGE / DATA_VALIDATION uploads,
+  // which span every brand under one client group — each row resolves its
+  // own Brand by (row's Brand name, this parentGroup). Null for
+  // CURRENT_SITES / LEADS_PIPELINE, which aren't scoped to one parent group.
+  parentGroup String?      @map("parent_group") @db.VarChar(100)
+  type        UploadType
+  filename    String       @db.VarChar(255)
+  rowCount    Int?         @map("row_count") @db.UnsignedInt
+  status      UploadStatus @default(previewed)
 
   createdById BigInt  @map("created_by")
   createdBy   User    @relation("UploadCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
@@ -352,6 +405,7 @@ model Upload {
 
   properties    Property[]
   referenceRows UploadReferenceArchive[]
+  pipelineLeads PipelineLead[]
 
   @@map("uploads")
 }

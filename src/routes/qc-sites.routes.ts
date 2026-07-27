@@ -41,6 +41,7 @@ const qcSiteSchema = z.object({
   qcOpsStartDate: z.string().datetime().nullish().or(z.literal("").transform(() => null)),
   roomBedCount: z.number().int().positive().nullish(),
   status: z.string().max(50).optional(),
+  propertyType: z.string().max(50).nullish(),
   modelType: z.enum(MODEL_TYPES),
 });
 
