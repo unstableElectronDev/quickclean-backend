@@ -154,38 +154,20 @@ async function buildPropertiesSummary(rows: ParsedRow<PropertyRowData>[], parent
   };
 }
 
-async function buildReferenceSummary(rows: ParsedRow<ReferenceRowData>[], parentGroup: string) {
-  const withIdentity = rows.filter((r) => r.data?.brandName && r.data.srNo !== null);
-  const brandNames = [...new Set(withIdentity.map((r) => r.data!.brandName!))];
-  const existingBrands = brandNames.length
-    ? await prisma.brand.findMany({
-        where: { parentGroup, name: { in: brandNames } },
-        select: { id: true, name: true },
-      })
-    : [];
-  const brandIdByName = new Map(existingBrands.map((b) => [b.name, b.id]));
-
-  let matchedCount = 0;
-  if (existingBrands.length > 0) {
-    const srNos = withIdentity.map((r) => r.data!.srNo!).filter((n): n is number => n !== null);
-    const existingProps = await prisma.property.findMany({
-      where: { brandId: { in: existingBrands.map((b) => b.id) }, srNo: { in: srNos } },
-      select: { brandId: true, srNo: true },
-    });
-    const existingKeys = new Set(existingProps.map((p) => `${p.brandId}:${p.srNo}`));
-    matchedCount = withIdentity.filter((r) => {
-      const brandId = brandIdByName.get(r.data!.brandName!);
-      return brandId !== undefined && existingKeys.has(`${brandId}:${r.data!.srNo}`);
-    }).length;
-  }
-
-  return { totalRows: rows.length, matchedCount, unmatchedCount: rows.length - matchedCount };
+// Reference sheets (QC Average / Brand Average / Data Validation) usually
+// arrive alongside brand-new Properties rows in the same file — those
+// properties don't exist in the DB yet at preview time, so a "matched
+// against the DB" count would always read 0 regardless of whether the file
+// is actually fine. Real matching happens at commit time, within the same
+// transaction as the Properties rows being created — this is just a count.
+function buildReferenceSummary(rows: ParsedRow<ReferenceRowData>[]) {
+  return { totalRows: rows.length };
 }
 
 async function buildBrandFilePreview(result: Awaited<ReturnType<typeof parseBrandFile>>, parentGroup: string) {
   const reference: Record<string, unknown> = {};
   for (const r of result.reference) {
-    reference[r.kind] = await buildReferenceSummary(r.rows, parentGroup);
+    reference[r.kind] = buildReferenceSummary(r.rows);
   }
 
   return {
