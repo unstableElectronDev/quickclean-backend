@@ -41,11 +41,6 @@ enum DevelopmentType {
   Greenfield
 }
 
-enum OperatedBy {
-  Client
-  QuickClean
-}
-
 enum SiteCategory {
   Healthcare
   Hospitality
@@ -230,7 +225,9 @@ model Property {
   city            String          @db.VarChar(100)
   propertyType    PropertyType    @map("property_type")
   developmentType DevelopmentType @map("development_type")
-  operatedBy      OperatedBy      @map("operated_by")
+  // Free text, not an enum — real files hold the actual operator/company
+  // name (e.g. "IHCL", "Self", a third-party operator), not just Client/QC.
+  operatedBy      String          @map("operated_by") @db.VarChar(255)
   starCategory    Int             @map("star_category") @db.UnsignedTinyInt
   roomCount       Int             @map("room_count") @db.UnsignedInt
   openingYear     Int?            @map("opening_year") @db.UnsignedSmallInt

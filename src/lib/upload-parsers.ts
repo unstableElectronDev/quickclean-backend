@@ -7,7 +7,6 @@ import * as XLSX from "xlsx";
 export const REGIONS = ["North", "South", "East", "West", "Central"] as const;
 export const PROPERTY_TYPES = ["Resort", "Hotel"] as const;
 export const DEVELOPMENT_TYPES = ["Brownfield", "Greenfield"] as const;
-export const OPERATED_BY_VALUES = ["Client", "QuickClean"] as const;
 export const SITE_CATEGORIES = ["Healthcare", "Hospitality"] as const;
 export const MODEL_TYPES = ["OPL", "Outsourcing", "Rental"] as const;
 
@@ -176,7 +175,7 @@ export type PropertyRowData = {
   city: string;
   propertyType: (typeof PROPERTY_TYPES)[number];
   developmentType: (typeof DEVELOPMENT_TYPES)[number];
-  operatedBy: (typeof OPERATED_BY_VALUES)[number];
+  operatedBy: string;
   starCategory: number;
   roomCount: number;
   openingYear: number | null;
@@ -223,8 +222,8 @@ export function parsePropertiesFile(buffer: Buffer): { rows: ParsedRow<PropertyR
     const developmentType = normalizeEnum(cellToString(fields.developmentType), DEVELOPMENT_TYPES);
     if (!developmentType) errors.push("Brownfield / Greenfield must be one of those two values");
 
-    const operatedBy = normalizeEnum(cellToString(fields.operatedBy), OPERATED_BY_VALUES);
-    if (!operatedBy) errors.push("Operated by must be Client or QuickClean");
+    const operatedBy = cellToString(fields.operatedBy);
+    if (!operatedBy) errors.push("Operated by is required");
 
     const starCategory = cellToNumber(fields.starCategory);
     if (starCategory === null || !Number.isInteger(starCategory) || starCategory < 1 || starCategory > 5) {
