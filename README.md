@@ -51,6 +51,10 @@ Seed creates the first admin account (no public sign-up — someone has to boots
 | `GET /api/qc-sites/:id/match-suggestions` | admin | Fuzzy-matched candidate properties (Dice coefficient on name + city) |
 | `POST /api/qc-sites/:id/match` | admin | Confirm `matched_property_id` |
 | `GET /api/pipeline-leads` | admin, sales_head | List imported sales-pipeline leads |
+| `GET /api/pipeline-leads/summary-by-state` | admin, sales_head | State x Industry pivot (counts) |
+| `GET /api/properties` | authenticated | List properties — filters: `parentGroup`, `brandId`, `region`, `propertyType`, `q` (name/city/state search) |
+| `GET /api/properties/:id` | authenticated | Single property |
+| `GET /api/properties/:id/reference` | authenticated | That property's matched QC Average / Brand Average / Data Validation rows, joined by `(brand.parentGroup, srNo)` — not a stored FK |
 
 Every route re-checks role independently server-side — this is the actual enforcement point, not the frontend's UI or middleware.
 
