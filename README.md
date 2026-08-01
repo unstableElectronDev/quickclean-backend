@@ -60,18 +60,15 @@ Every route re-checks role independently server-side — this is the actual enfo
 
 ## Upload file types
 
-A single `POST /api/uploads` endpoint handles six distinct file types, selected via the `fileType` field — each has its own real-world column layout (see `src/lib/upload-parsers.ts` for the exact header-matching dictionaries):
+A single `POST /api/uploads` endpoint handles three file types, selected via the `fileType` field (see `src/lib/upload-parsers.ts` for the exact header-matching dictionaries):
 
 | `fileType` | Needs `parentGroup`? | What it does |
 |---|---|---|
-| `PROPERTIES` | Yes | Upserts `properties` by `(brandId, srNo)`. Spans every sub-brand under the given parent group — each row's own `Brand` column resolves (and auto-creates, if new) the specific `Brand` record scoped to that parent group. |
-| `QC_AVERAGE` | Yes | Archives rows verbatim into `upload_reference_archive`; matches to an existing property by `(brand, srNo)` for provenance, doesn't write to `properties`. |
-| `BRAND_AVERAGE` | Yes | Same as `QC_AVERAGE`. |
-| `DATA_VALIDATION` | Yes | Same as `QC_AVERAGE`, plus applies its "Data Validation Link" column as `properties.source_url` on the matched row. |
-| `CURRENT_SITES` | No | Upserts `qc_operational_sites` by `site_code` — **in addition to** the one-at-a-time admin form, not instead of it. Both write to the same table. |
+| `BRAND_FILE` | Yes | One workbook, up to 4 sheets — Properties, QC Average, Brand Average, Data Validation — matching the real client file layout. Sheets are identified by **name** (regex against each sheet's title, e.g. anything containing "propert", "qc.*average", "brand\|ihcl.*average", "data.*valid"), not position, so they can be in any order and any of the 4 can be missing (a workbook with just a Properties sheet is valid). Properties rows upsert `properties` by `(brandId, srNo)`, auto-creating brands under the given parent group from each row's own `Brand` column. The 3 reference sheets archive verbatim into `upload_reference_archive` and match to properties **within the same upload/transaction** by `(brand, srNo)` — Data Validation additionally applies its "Data Validation Link" column as `properties.source_url`. |
+| `CURRENT_SITES` | No | Upserts `qc_operational_sites` by `(site_code, client_code)` — **in addition to** the one-at-a-time admin form, not instead of it. Both write to the same table. |
 | `LEADS_PIPELINE` | No | Bulk-inserts into `pipeline_leads` (see Notes) — no matching/upsert, every valid row is a new record. |
 
-`PROPERTIES`/`QC_AVERAGE`/`BRAND_AVERAGE`/`DATA_VALIDATION` uploads are conceptually one client-group's data cycle split across separate files (matching the real filenames: "IHCL Properties", "QC Average", "IHCL Average", "Data Validation") — they cross-reference each other by `(Brand, Sr. No.)`, not by upload ID, so they can be uploaded in any order.
+Because all 4 Brand File sheets are parsed from the same upload, cross-referencing (QC Average → Properties, Data Validation → Properties) is exact and immediate — no dependency on a previous separate upload having already landed, unlike the earlier per-file-type design this replaced.
 
 ## Notes
 

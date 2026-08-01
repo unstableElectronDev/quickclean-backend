@@ -8,11 +8,13 @@ import { findBrand, findOrCreateBrand } from "../lib/brand-resolve";
 import {
   FILE_TYPES,
   PARENT_GROUP_SCOPED_TYPES,
-  parsePropertiesFile,
-  parseReferenceFile,
+  parseBrandFile,
   parseCurrentSitesFile,
   parsePipelineLeadsFile,
-  type FileType,
+  type PropertyRowData,
+  type ReferenceRowData,
+  type ReferenceKind,
+  type ParsedRow,
 } from "../lib/upload-parsers";
 import { putPendingUpload, getPendingUpload, deletePendingUpload, type PendingUpload } from "../lib/upload-store";
 import type { Prisma } from "@prisma/client";
@@ -25,10 +27,10 @@ const upload = multer({
   limits: { fileSize: 20 * 1024 * 1024 },
 });
 
-const ARCHIVE_SHEET_NAME: Partial<Record<FileType, Prisma.UploadReferenceArchiveCreateInput["sheetName"]>> = {
-  QC_AVERAGE: "QC_Average",
-  BRAND_AVERAGE: "Brand_Average",
-  DATA_VALIDATION: "Data_Validation",
+const ARCHIVE_SHEET_NAME: Record<ReferenceKind, Prisma.UploadReferenceArchiveCreateInput["sheetName"]> = {
+  QC_Average: "QC_Average",
+  Brand_Average: "Brand_Average",
+  Data_Validation: "Data_Validation",
 };
 
 uploadsRouter.get("/", async (_req, res) => {
@@ -66,18 +68,10 @@ uploadsRouter.post("/", upload.single("file"), async (req, res) => {
 
   try {
     switch (fileType) {
-      case "PROPERTIES": {
-        const { rows } = parsePropertiesFile(req.file.buffer);
-        pending = { fileType, parentGroup: parentGroup!, rows };
-        preview = await buildPropertiesPreview(rows, parentGroup!);
-        break;
-      }
-      case "QC_AVERAGE":
-      case "BRAND_AVERAGE":
-      case "DATA_VALIDATION": {
-        const { rows } = parseReferenceFile(req.file.buffer);
-        pending = { fileType, parentGroup: parentGroup!, rows };
-        preview = await buildReferencePreview(rows, parentGroup!);
+      case "BRAND_FILE": {
+        const result = parseBrandFile(req.file.buffer);
+        pending = { fileType, parentGroup: parentGroup!, properties: result.properties, reference: result.reference };
+        preview = await buildBrandFilePreview(result, parentGroup!);
         break;
       }
       case "CURRENT_SITES": {
@@ -122,13 +116,15 @@ uploadsRouter.post("/", upload.single("file"), async (req, res) => {
   });
 });
 
-async function buildPropertiesPreview(rows: Awaited<ReturnType<typeof parsePropertiesFile>>["rows"], parentGroup: string) {
+async function buildPropertiesSummary(rows: ParsedRow<PropertyRowData>[], parentGroup: string) {
   const validRows = rows.filter((r) => r.errors.length === 0 && r.data);
   const brandNames = [...new Set(validRows.map((r) => r.data!.brandName))];
-  const existingBrands = await prisma.brand.findMany({
-    where: { parentGroup, name: { in: brandNames } },
-    select: { id: true, name: true },
-  });
+  const existingBrands = brandNames.length
+    ? await prisma.brand.findMany({
+        where: { parentGroup, name: { in: brandNames } },
+        select: { id: true, name: true },
+      })
+    : [];
   const brandIdByName = new Map(existingBrands.map((b) => [b.name, b.id]));
 
   let updateCount = 0;
@@ -158,13 +154,15 @@ async function buildPropertiesPreview(rows: Awaited<ReturnType<typeof parsePrope
   };
 }
 
-async function buildReferencePreview(rows: Awaited<ReturnType<typeof parseReferenceFile>>["rows"], parentGroup: string) {
+async function buildReferenceSummary(rows: ParsedRow<ReferenceRowData>[], parentGroup: string) {
   const withIdentity = rows.filter((r) => r.data?.brandName && r.data.srNo !== null);
   const brandNames = [...new Set(withIdentity.map((r) => r.data!.brandName!))];
-  const existingBrands = await prisma.brand.findMany({
-    where: { parentGroup, name: { in: brandNames } },
-    select: { id: true, name: true },
-  });
+  const existingBrands = brandNames.length
+    ? await prisma.brand.findMany({
+        where: { parentGroup, name: { in: brandNames } },
+        select: { id: true, name: true },
+      })
+    : [];
   const brandIdByName = new Map(existingBrands.map((b) => [b.name, b.id]));
 
   let matchedCount = 0;
@@ -181,10 +179,22 @@ async function buildReferencePreview(rows: Awaited<ReturnType<typeof parseRefere
     }).length;
   }
 
+  return { totalRows: rows.length, matchedCount, unmatchedCount: rows.length - matchedCount };
+}
+
+async function buildBrandFilePreview(result: Awaited<ReturnType<typeof parseBrandFile>>, parentGroup: string) {
+  const reference: Record<string, unknown> = {};
+  for (const r of result.reference) {
+    reference[r.kind] = await buildReferenceSummary(r.rows, parentGroup);
+  }
+
   return {
-    totalRows: rows.length,
-    matchedCount,
-    unmatchedCount: rows.length - matchedCount,
+    sheetsFound: result.sheetsFound,
+    sheetsNotFound: result.sheetsNotFound,
+    properties: result.properties.length > 0 ? await buildPropertiesSummary(result.properties, parentGroup) : null,
+    qcAverage: reference.QC_Average ?? null,
+    brandAverage: reference.Brand_Average ?? null,
+    dataValidation: reference.Data_Validation ?? null,
   };
 }
 
@@ -223,6 +233,17 @@ uploadsRouter.get("/:id/preview", async (req, res) => {
     });
   }
 
+  if (pending.fileType === "BRAND_FILE") {
+    const preview = await buildBrandFilePreview(
+      { sheetsFound: [], sheetsNotFound: [], properties: pending.properties, reference: pending.reference },
+      pending.parentGroup
+    );
+    return res.json({
+      upload: { id: uploadRow.id, filename: uploadRow.filename, status: uploadRow.status, fileType: uploadRow.type },
+      preview,
+    });
+  }
+
   const validRows = pending.rows.filter((r) => r.errors.length === 0);
   res.json({
     upload: { id: uploadRow.id, filename: uploadRow.filename, status: uploadRow.status, fileType: uploadRow.type },
@@ -250,13 +271,16 @@ uploadsRouter.post("/:id/commit", async (req, res) => {
   }
 
   const userId = BigInt(req.user!.id);
+  let rowCount = 0;
+
   const result = await prisma.$transaction(
     async (tx) => {
       switch (pending.fileType) {
-        case "PROPERTIES": {
-          let created = 0;
-          let updated = 0;
-          for (const row of pending.rows) {
+        case "BRAND_FILE": {
+          let propertiesCreated = 0;
+          let propertiesUpdated = 0;
+
+          for (const row of pending.properties) {
             if (row.errors.length > 0 || !row.data) continue;
             const data = row.data;
             const brand = await findOrCreateBrand(tx, data.brandName, pending.parentGroup, userId);
@@ -279,51 +303,52 @@ uploadsRouter.post("/:id/commit", async (req, res) => {
 
             if (existing) {
               await tx.property.update({ where: { id: existing.id }, data: { ...fields, uploadId, updatedById: userId } });
-              updated += 1;
+              propertiesUpdated += 1;
             } else {
               await tx.property.create({
                 data: { ...fields, srNo: data.srNo, brandId: brand.id, uploadId, createdById: userId },
               });
-              created += 1;
+              propertiesCreated += 1;
             }
+            rowCount += 1;
           }
-          return { created, updated };
-        }
 
-        case "QC_AVERAGE":
-        case "BRAND_AVERAGE":
-        case "DATA_VALIDATION": {
-          let archived = 0;
-          let matched = 0;
-          for (const row of pending.rows) {
-            if (!row.data) continue;
-            const { srNo, brandName, sourceUrl, raw } = row.data;
+          let referenceArchived = 0;
+          let referenceMatched = 0;
 
-            if (brandName && srNo !== null) {
-              const brand = await findBrand(tx, brandName, pending.parentGroup);
-              if (brand) {
-                const property = await tx.property.findFirst({ where: { brandId: brand.id, srNo } });
-                if (property) {
-                  matched += 1;
-                  if (pending.fileType === "DATA_VALIDATION" && sourceUrl) {
-                    await tx.property.update({ where: { id: property.id }, data: { sourceUrl, updatedById: userId } });
+          for (const group of pending.reference) {
+            for (const row of group.rows) {
+              if (!row.data) continue;
+              const { srNo, brandName, sourceUrl, raw } = row.data;
+
+              if (brandName && srNo !== null) {
+                const brand = await findBrand(tx, brandName, pending.parentGroup);
+                if (brand) {
+                  const property = await tx.property.findFirst({ where: { brandId: brand.id, srNo } });
+                  if (property) {
+                    referenceMatched += 1;
+                    if (group.kind === "Data_Validation" && sourceUrl) {
+                      await tx.property.update({ where: { id: property.id }, data: { sourceUrl, updatedById: userId } });
+                    }
                   }
                 }
               }
-            }
 
-            await tx.uploadReferenceArchive.create({
-              data: {
-                uploadId,
-                sheetName: ARCHIVE_SHEET_NAME[pending.fileType]!,
-                srNo,
-                rawRow: raw as Prisma.InputJsonValue,
-                createdById: userId,
-              },
-            });
-            archived += 1;
+              await tx.uploadReferenceArchive.create({
+                data: {
+                  uploadId,
+                  sheetName: ARCHIVE_SHEET_NAME[group.kind],
+                  srNo,
+                  rawRow: raw as Prisma.InputJsonValue,
+                  createdById: userId,
+                },
+              });
+              referenceArchived += 1;
+              rowCount += 1;
+            }
           }
-          return { archived, matched };
+
+          return { propertiesCreated, propertiesUpdated, referenceArchived, referenceMatched };
         }
 
         case "CURRENT_SITES": {
@@ -362,6 +387,7 @@ uploadsRouter.post("/:id/commit", async (req, res) => {
               });
               created += 1;
             }
+            rowCount += 1;
           }
           return { created, updated };
         }
@@ -375,6 +401,7 @@ uploadsRouter.post("/:id/commit", async (req, res) => {
               data: { ...data, uploadId, createdById: userId },
             });
             created += 1;
+            rowCount += 1;
           }
           return { created };
         }
@@ -383,7 +410,6 @@ uploadsRouter.post("/:id/commit", async (req, res) => {
     { timeout: 60000 }
   );
 
-  const rowCount = pending.rows.filter((r) => r.errors.length === 0).length;
   await prisma.upload.update({
     where: { id: uploadId },
     data: { status: "committed", rowCount, updatedById: userId },

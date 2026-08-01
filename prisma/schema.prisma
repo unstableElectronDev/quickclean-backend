@@ -61,10 +61,10 @@ enum LeadStatus {
 
 enum UploadType {
   CURRENT_SITES
-  PROPERTIES
-  QC_AVERAGE
-  BRAND_AVERAGE
-  DATA_VALIDATION
+  // One workbook containing up to 4 sheets — Properties, QC Average, Brand
+  // Average, Data Validation — matching how the real client file is
+  // actually structured, rather than 4 separate uploads.
+  BRAND_FILE
   LEADS_PIPELINE
 }
 

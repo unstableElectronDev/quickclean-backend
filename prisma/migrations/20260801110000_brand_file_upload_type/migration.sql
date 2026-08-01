@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE `uploads` MODIFY `type` ENUM('CURRENT_SITES', 'BRAND_FILE', 'LEADS_PIPELINE') NOT NULL;
+

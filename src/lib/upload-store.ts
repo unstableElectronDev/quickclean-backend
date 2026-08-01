@@ -2,13 +2,18 @@ import type {
   ParsedRow,
   PropertyRowData,
   ReferenceRowData,
+  ReferenceKind,
   CurrentSiteRowData,
   PipelineLeadRowData,
 } from "./upload-parsers";
 
 export type PendingUpload =
-  | { fileType: "PROPERTIES"; parentGroup: string; rows: ParsedRow<PropertyRowData>[] }
-  | { fileType: "QC_AVERAGE" | "BRAND_AVERAGE" | "DATA_VALIDATION"; parentGroup: string; rows: ParsedRow<ReferenceRowData>[] }
+  | {
+      fileType: "BRAND_FILE";
+      parentGroup: string;
+      properties: ParsedRow<PropertyRowData>[];
+      reference: Array<{ kind: ReferenceKind; rows: ParsedRow<ReferenceRowData>[] }>;
+    }
   | { fileType: "CURRENT_SITES"; rows: ParsedRow<CurrentSiteRowData>[] }
   | { fileType: "LEADS_PIPELINE"; rows: ParsedRow<PipelineLeadRowData>[] };
 

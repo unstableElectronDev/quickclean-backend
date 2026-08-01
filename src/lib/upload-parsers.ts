@@ -10,26 +10,14 @@ export const DEVELOPMENT_TYPES = ["Brownfield", "Greenfield"] as const;
 export const SITE_CATEGORIES = ["Healthcare", "Hospitality"] as const;
 export const MODEL_TYPES = ["OPL", "Outsourcing", "Rental"] as const;
 
-export const FILE_TYPES = [
-  "CURRENT_SITES",
-  "PROPERTIES",
-  "QC_AVERAGE",
-  "BRAND_AVERAGE",
-  "DATA_VALIDATION",
-  "LEADS_PIPELINE",
-] as const;
+export const FILE_TYPES = ["CURRENT_SITES", "BRAND_FILE", "LEADS_PIPELINE"] as const;
 export type FileType = (typeof FILE_TYPES)[number];
 
-// A TAM upload spans every brand under one client group (Properties, QC
-// Average, Brand Average, Data Validation all carry their own per-row
-// "Brand" column) — these need a Parent Group selected at upload time.
+// A Brand File spans every sub-brand under one client group (each row in
+// its Properties/QC Average/Brand Average/Data Validation sheets carries
+// its own "Brand" column) — needs a Parent Group selected at upload time.
 // Current Sites and Leads Pipeline are company-wide, not scoped to one group.
-export const PARENT_GROUP_SCOPED_TYPES: FileType[] = [
-  "PROPERTIES",
-  "QC_AVERAGE",
-  "BRAND_AVERAGE",
-  "DATA_VALIDATION",
-];
+export const PARENT_GROUP_SCOPED_TYPES: FileType[] = ["BRAND_FILE"];
 
 // ---------------------------------------------------------------------------
 // Shared cell/header helpers
@@ -82,46 +70,44 @@ function isBlankRow(fields: Record<string, unknown>): boolean {
 
 const HEADER_SCAN_LIMIT = 15;
 
+function scoreRow(row: unknown[], headerMap: Record<string, string>): number {
+  return row.reduce<number>((acc, cell) => {
+    if (typeof cell !== "string") return acc;
+    return headerMap[normalizeHeader(cell)] ? acc + 1 : acc;
+  }, 0);
+}
+
 /**
  * Real exported spreadsheets often have a title/banner row (or a blank row)
  * above the actual column headers. Scanning blindly assumes row 1 is the
  * header, which silently produces zero rows if that assumption is wrong —
  * every "data" row gets read against the wrong header and dropped as blank.
  * Instead, scan the first few rows and pick whichever one matches the most
- * columns from this file type's known header dictionary.
+ * columns from this file type's known header dictionary. Returns -1 if no
+ * row matches at all (caller decides whether that's an error or "sheet not
+ * applicable here").
  */
-function findHeaderRowIndex(grid: unknown[][], headerMap: Record<string, string>): number {
+function locateHeaderRow(grid: unknown[][], headerMap: Record<string, string>): number {
   let bestIndex = -1;
   let bestScore = 0;
   const scanLimit = Math.min(grid.length, HEADER_SCAN_LIMIT);
 
   for (let i = 0; i < scanLimit; i++) {
-    const row = grid[i];
-    const score = row.reduce<number>((acc, cell) => {
-      if (typeof cell !== "string") return acc;
-      return headerMap[normalizeHeader(cell)] ? acc + 1 : acc;
-    }, 0);
+    const score = scoreRow(grid[i], headerMap);
     if (score > bestScore) {
       bestScore = score;
       bestIndex = i;
     }
   }
 
-  if (bestIndex === -1) {
-    const firstRowPreview = (grid[0] ?? [])
-      .map((c) => cellToString(c))
-      .filter((c): c is string => c !== null)
-      .join(", ");
-    throw new Error(
-      `Could not find a recognizable header row in this file (checked the first ${scanLimit} rows). ` +
-        `First row found: "${firstRowPreview || "(blank)"}". Check you picked the right file type.`
-    );
-  }
-
   return bestIndex;
 }
 
-/** Reads the first sheet, auto-detecting which row is the real header. */
+function gridForSheet(workbook: XLSX.WorkBook, sheetName: string): unknown[][] {
+  return XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[sheetName], { header: 1, blankrows: false });
+}
+
+/** Reads the first sheet of a single-sheet file, auto-detecting the header row. */
 function readSheet(
   buffer: Buffer,
   headerMap: Record<string, string>
@@ -129,9 +115,22 @@ function readSheet(
   const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) throw new Error("This file has no sheets");
-  const sheet = workbook.Sheets[sheetName];
-  const grid = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, blankrows: false });
-  const headerRowIndex = findHeaderRowIndex(grid, headerMap);
+  const grid = gridForSheet(workbook, sheetName);
+  const headerRowIndex = locateHeaderRow(grid, headerMap);
+
+  if (headerRowIndex === -1) {
+    const firstRowPreview = (grid[0] ?? [])
+      .map((c) => cellToString(c))
+      .filter((c): c is string => c !== null)
+      .join(", ");
+    throw new Error(
+      `Could not find a recognizable header row in this file (checked the first ${Math.min(
+        grid.length,
+        HEADER_SCAN_LIMIT
+      )} rows). First row found: "${firstRowPreview || "(blank)"}". Check you picked the right file type.`
+    );
+  }
+
   return { headerRow: grid[headerRowIndex], dataRows: grid.slice(headerRowIndex + 1), headerRowIndex };
 }
 
@@ -144,7 +143,7 @@ function extractFields(row: unknown[], headerMap: Record<number, string>): Recor
 }
 
 // ---------------------------------------------------------------------------
-// 1. Properties file (e.g. "IHCL Properties")
+// Properties sheet (real inputs; part of a Brand File)
 // ---------------------------------------------------------------------------
 
 const PROPERTIES_HEADER_MAP: Record<string, string> = {
@@ -182,8 +181,11 @@ export type PropertyRowData = {
   capexDeployed: number;
 };
 
-export function parsePropertiesFile(buffer: Buffer): { rows: ParsedRow<PropertyRowData>[] } {
-  const { headerRow, dataRows, headerRowIndex } = readSheet(buffer, PROPERTIES_HEADER_MAP);
+function parsePropertiesGrid(
+  headerRow: unknown[],
+  dataRows: unknown[][],
+  headerRowIndex: number
+): ParsedRow<PropertyRowData>[] {
   const headerMap = mapHeaders(headerRow, PROPERTIES_HEADER_MAP);
   const rows: ParsedRow<PropertyRowData>[] = [];
   const seenSrNo = new Set<number>();
@@ -269,13 +271,13 @@ export function parsePropertiesFile(buffer: Buffer): { rows: ParsedRow<PropertyR
     });
   });
 
-  return { rows };
+  return rows;
 }
 
 // ---------------------------------------------------------------------------
-// 2/3/4. Reference files — QC Average, Brand Average, Data Validation
-// (structurally identical: same identity columns, archived verbatim; Data
-// Validation additionally carries the source-of-truth URL)
+// Reference sheets — QC Average, Brand Average, Data Validation (part of a
+// Brand File; structurally identical, archived verbatim; Data Validation
+// additionally carries the source-of-truth URL)
 // ---------------------------------------------------------------------------
 
 const REFERENCE_HEADER_MAP: Record<string, string> = {
@@ -299,8 +301,7 @@ export type ReferenceRowData = {
   raw: Record<string, unknown>;
 };
 
-export function parseReferenceFile(buffer: Buffer): { rows: ParsedRow<ReferenceRowData>[] } {
-  const { headerRow, dataRows, headerRowIndex } = readSheet(buffer, REFERENCE_HEADER_MAP);
+function parseReferenceGrid(headerRow: unknown[], dataRows: unknown[][], headerRowIndex: number): ParsedRow<ReferenceRowData>[] {
   const headerMap = mapHeaders(headerRow, REFERENCE_HEADER_MAP);
   const rawHeaders = headerRow.map((h) => cellToString(h) ?? "");
   const rows: ParsedRow<ReferenceRowData>[] = [];
@@ -323,11 +324,93 @@ export function parseReferenceFile(buffer: Buffer): { rows: ParsedRow<ReferenceR
     rows.push({ rowNumber, errors: [], data: { srNo, brandName, sourceUrl, raw } });
   });
 
-  return { rows };
+  return rows;
 }
 
 // ---------------------------------------------------------------------------
-// 5. Current Sites file ("CURRENT SITES LIST.xlsx")
+// Brand File — one workbook, up to 4 sheets (Properties, QC Average, Brand
+// Average, Data Validation), matching how the real client file is actually
+// laid out. Sheets are identified by name, not by position.
+// ---------------------------------------------------------------------------
+
+export type ReferenceKind = "QC_Average" | "Brand_Average" | "Data_Validation";
+
+export type BrandFileResult = {
+  sheetsFound: string[];
+  sheetsNotFound: string[];
+  properties: ParsedRow<PropertyRowData>[];
+  reference: Array<{ kind: ReferenceKind; rows: ParsedRow<ReferenceRowData>[] }>;
+};
+
+function findPropertiesSheetName(sheetNames: string[]): string | null {
+  const byName = sheetNames.find((n) => /propert/i.test(n));
+  if (byName) return byName;
+  return sheetNames.find((n) => !/average|valid/i.test(n)) ?? null;
+}
+
+function classifyReferenceSheetName(name: string): ReferenceKind | null {
+  if (/qc.*average/i.test(name)) return "QC_Average";
+  if (/brand.*average|ihcl.*average/i.test(name)) return "Brand_Average";
+  if (/data.*valid/i.test(name)) return "Data_Validation";
+  return null;
+}
+
+const REFERENCE_KIND_LABEL: Record<ReferenceKind, string> = {
+  QC_Average: "QC Average",
+  Brand_Average: "Brand Average",
+  Data_Validation: "Data Validation",
+};
+
+export function parseBrandFile(buffer: Buffer): BrandFileResult {
+  const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
+  const sheetNames = workbook.SheetNames;
+  if (sheetNames.length === 0) throw new Error("This file has no sheets");
+
+  const propertiesSheetName = findPropertiesSheetName(sheetNames);
+  const sheetsFound: string[] = [];
+  let properties: ParsedRow<PropertyRowData>[] = [];
+
+  if (propertiesSheetName) {
+    const grid = gridForSheet(workbook, propertiesSheetName);
+    const headerRowIndex = locateHeaderRow(grid, PROPERTIES_HEADER_MAP);
+    if (headerRowIndex !== -1) {
+      sheetsFound.push(propertiesSheetName);
+      properties = parsePropertiesGrid(grid[headerRowIndex], grid.slice(headerRowIndex + 1), headerRowIndex);
+    }
+  }
+
+  const reference: BrandFileResult["reference"] = [];
+  for (const sheetName of sheetNames) {
+    if (sheetName === propertiesSheetName) continue;
+    const kind = classifyReferenceSheetName(sheetName);
+    if (!kind) continue;
+    const grid = gridForSheet(workbook, sheetName);
+    const headerRowIndex = locateHeaderRow(grid, REFERENCE_HEADER_MAP);
+    if (headerRowIndex === -1) continue;
+    sheetsFound.push(sheetName);
+    reference.push({ kind, rows: parseReferenceGrid(grid[headerRowIndex], grid.slice(headerRowIndex + 1), headerRowIndex) });
+  }
+
+  if (sheetsFound.length === 0) {
+    throw new Error(
+      `Could not recognize any sheet in this file as Properties, QC Average, Brand Average, or Data Validation. ` +
+        `Sheets found: ${sheetNames.join(", ")}.`
+    );
+  }
+
+  const foundKinds = new Set<string>([
+    ...(properties.length > 0 || propertiesSheetName ? ["Properties"] : []),
+    ...reference.map((r) => REFERENCE_KIND_LABEL[r.kind]),
+  ]);
+  const sheetsNotFound = ["Properties", "QC Average", "Brand Average", "Data Validation"].filter(
+    (k) => !foundKinds.has(k)
+  );
+
+  return { sheetsFound, sheetsNotFound, properties, reference };
+}
+
+// ---------------------------------------------------------------------------
+// Current Sites file ("CURRENT SITES LIST.xlsx")
 // ---------------------------------------------------------------------------
 
 const CURRENT_SITES_HEADER_MAP: Record<string, string> = {
@@ -453,7 +536,7 @@ export function parseCurrentSitesFile(buffer: Buffer): { rows: ParsedRow<Current
 }
 
 // ---------------------------------------------------------------------------
-// 6. Leads in Pipeline file (Sheet0)
+// Leads in Pipeline file (Sheet0)
 // ---------------------------------------------------------------------------
 
 const PIPELINE_LEADS_HEADER_MAP: Record<string, string> = {
