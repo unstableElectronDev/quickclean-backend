@@ -232,7 +232,9 @@ model Property {
   roomCount       Int             @map("room_count") @db.UnsignedInt
   openingYear     Int?            @map("opening_year") @db.UnsignedSmallInt
   capexDeployed   Decimal         @default(0) @map("capex_deployed") @db.Decimal(12, 2)
-  sourceUrl       String?         @map("source_url") @db.VarChar(500)
+  // TEXT, not VARCHAR(500) — real Data Validation Link values (SharePoint/
+  // OneDrive share links with tokens, etc.) routinely exceed 500 chars.
+  sourceUrl       String?         @map("source_url") @db.Text
   lat             Decimal?        @db.Decimal(9, 6)
   lng             Decimal?        @db.Decimal(9, 6)
 
