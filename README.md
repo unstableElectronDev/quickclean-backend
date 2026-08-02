@@ -56,6 +56,7 @@ Seed creates the first admin account (no public sign-up — someone has to boots
 | `GET /api/properties/:id` | authenticated | Single property |
 | `GET /api/properties/:id/reference` | authenticated | That property's matched QC Average / Brand Average / Data Validation rows, joined by `(brand.parentGroup, srNo)` — not a stored FK |
 | `GET /api/dashboard/overview` | authenticated | Aggregated counts for the Dashboard page — totals, by-region, by-city (for the map), by-brand, brands-by-star. Filters: `parentGroup`, `brandId`, `region`, `state`, `city`, `starCategory`, `operatedBy`, `propertyType`, `developmentType` |
+| `GET /api/dashboard/qc-penetration?parentGroup=X` | authenticated | "QC at &lt;client&gt;" — how much of that parent group's portfolio has a confirmed `matched_property_id` link (via the Current Sites fuzzy-match flow), with computed linen load using `src/lib/calc-engine.ts` |
 
 Every route re-checks role independently server-side — this is the actual enforcement point, not the frontend's UI or middleware.
 
@@ -80,4 +81,5 @@ Because all 4 Brand File sheets are parsed from the same upload, cross-referenci
 - `pipeline_leads` is an entirely new table, not in the original design doc — it's CRM-style sales pipeline data (Lead Owner, Lead Status, Estimated Revenue, etc.), unrelated to the existing `leads` table (which is the system-generated QC-site-to-property proximity match).
 - The `xlsx` package on npm carries known, unpatched high-severity CVEs (ReDoS, prototype pollution) — exactly the attack surface that matters for a feature that parses untrusted uploads. This installs SheetJS's own patched build directly from `cdn.sheetjs.com` instead (see `package.json`), which is their documented fix channel.
 - Upload preview data lives in an in-process `Map` (`src/lib/upload-store.ts`), not a database or Redis — matches the design doc's "in-memory only, no S3" intent. It does **not** survive a server restart between preview and commit; `commit` returns a 409 telling the admin to re-upload if that happens. Fine for a single-instance deployment; would need Redis behind a load balancer.
-- Not yet built: calc engine, map & proximity leads, hardening (Phases 3–5 of the design doc).
+- `src/lib/calc-engine.ts` computes linen load using `room_load_benchmarks` (parent-group-specific row if one exists, else the seeded `GLOBAL` row) × room count, at an **explicit, documented 100% occupancy assumption** — real occupancy lives in `client_group_benchmarks.avg_occupancy`, which isn't populated for any real parent group yet (no Settings UI exists to enter it). This is a genuine number derived from real configured rates, not a fabricated one, but it's not occupancy-adjusted; every place it's surfaced says so.
+- Not yet built: Settings UI for `client_group_benchmarks` (blocks Water/Energy/Cost/Savings and occupancy-adjusted Load everywhere), map & proximity leads, hardening (rest of Phases 3–5 of the design doc).

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { requireAuth } from "../middleware/auth";
 import type { Prisma } from "@prisma/client";
+import { loadBenchmarkTable, annualLoadMT, agingBucket } from "../lib/calc-engine";
 
 export const dashboardRouter = Router();
 dashboardRouter.use(requireAuth);
@@ -119,4 +120,87 @@ dashboardRouter.get("/overview", async (req, res) => {
     }));
 
   res.json({ totals, byRegion, byCity, byBrand, brandsByStar: brandsByStarSorted });
+});
+
+// "QC at <client>" — how much of a client group's portfolio QuickClean
+// actually operates today, using the real matched_property_id link (set via
+// the Current Sites fuzzy-match flow), not a guess.
+dashboardRouter.get("/qc-penetration", async (req, res) => {
+  const { parentGroup } = req.query;
+  if (typeof parentGroup !== "string" || !parentGroup) {
+    return res.status(400).json({ error: "parentGroup is required" });
+  }
+
+  const benchmarks = await loadBenchmarkTable(parentGroup);
+
+  const properties = await prisma.property.findMany({
+    where: { brand: { parentGroup } },
+    select: {
+      id: true,
+      name: true,
+      city: true,
+      state: true,
+      roomCount: true,
+      propertyType: true,
+      developmentType: true,
+      operatedBy: true,
+      starCategory: true,
+      openingYear: true,
+      brand: { select: { name: true } },
+      qcSitesMatched: { select: { id: true } },
+    },
+  });
+
+  const withLoad = properties.map((p) => {
+    const perRoomLoadKg = benchmarks.get(`${p.starCategory}:${p.propertyType}`) ?? null;
+    const loadMT = perRoomLoadKg !== null ? annualLoadMT(p.roomCount, perRoomLoadKg) : null;
+    return { ...p, loadMT, isQcOperated: p.qcSitesMatched.length > 0 };
+  });
+
+  const totals = {
+    properties: withLoad.length,
+    rooms: withLoad.reduce((sum, p) => sum + p.roomCount, 0),
+    loadMT: withLoad.reduce((sum, p) => sum + (p.loadMT ?? 0), 0),
+  };
+
+  const qcOperated = withLoad.filter((p) => p.isQcOperated);
+  const qc = {
+    properties: qcOperated.length,
+    rooms: qcOperated.reduce((sum, p) => sum + p.roomCount, 0),
+    loadMT: qcOperated.reduce((sum, p) => sum + (p.loadMT ?? 0), 0),
+  };
+
+  const cityKey = (city: string, state: string) => `${city}::${state}`;
+  const byCityMap = new Map<
+    string,
+    { city: string; state: string; brownfield: number; greenfield: number; total: number }
+  >();
+  for (const p of qcOperated) {
+    const key = cityKey(p.city, p.state);
+    const entry = byCityMap.get(key) ?? { city: p.city, state: p.state, brownfield: 0, greenfield: 0, total: 0 };
+    if (p.developmentType === "Brownfield") entry.brownfield += 1;
+    else entry.greenfield += 1;
+    entry.total += 1;
+    byCityMap.set(key, entry);
+  }
+  const byCity = [...byCityMap.values()].sort((a, b) => b.total - a.total);
+
+  const directory = qcOperated
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      brand: p.brand.name,
+      propertyType: p.propertyType,
+      developmentType: p.developmentType,
+      starCategory: p.starCategory,
+      city: p.city,
+      state: p.state,
+      roomCount: p.roomCount,
+      loadMT: p.loadMT !== null ? Math.round(p.loadMT) : null,
+      operatedBy: p.operatedBy,
+      aging: agingBucket(p.openingYear),
+    }))
+    .sort((a, b) => (b.loadMT ?? 0) - (a.loadMT ?? 0));
+
+  res.json({ totals, qc, byCity, directory, loadAssumption: "100% occupancy (real occupancy rates not configured)" });
 });
