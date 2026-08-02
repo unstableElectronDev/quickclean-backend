@@ -55,6 +55,7 @@ Seed creates the first admin account (no public sign-up — someone has to boots
 | `GET /api/properties` | authenticated | List properties — filters: `parentGroup`, `brandId`, `region`, `propertyType`, `q` (name/city/state search) |
 | `GET /api/properties/:id` | authenticated | Single property |
 | `GET /api/properties/:id/reference` | authenticated | That property's matched QC Average / Brand Average / Data Validation rows, joined by `(brand.parentGroup, srNo)` — not a stored FK |
+| `GET /api/dashboard/overview` | authenticated | Aggregated counts for the Dashboard page — totals, by-region, by-city (for the map), by-brand, brands-by-star. Filters: `parentGroup`, `brandId`, `region`, `state`, `city`, `starCategory`, `operatedBy`, `propertyType`, `developmentType` |
 
 Every route re-checks role independently server-side — this is the actual enforcement point, not the frontend's UI or middleware.
 

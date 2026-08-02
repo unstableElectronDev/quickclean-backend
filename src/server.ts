@@ -11,6 +11,7 @@ import { qcSitesRouter } from "./routes/qc-sites.routes";
 import { pipelineLeadsRouter } from "./routes/pipeline-leads.routes";
 import { propertiesRouter } from "./routes/properties.routes";
 import { referenceDataRouter } from "./routes/reference-data.routes";
+import { dashboardRouter } from "./routes/dashboard.routes";
 
 const app = express();
 
@@ -34,6 +35,7 @@ app.use("/api/qc-sites", qcSitesRouter);
 app.use("/api/pipeline-leads", pipelineLeadsRouter);
 app.use("/api/properties", propertiesRouter);
 app.use("/api/reference-data", referenceDataRouter);
+app.use("/api/dashboard", dashboardRouter);
 
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);
