@@ -46,7 +46,17 @@ propertiesRouter.get("/:id/reference", async (req, res) => {
     orderBy: [{ sheetName: "asc" }, { createdAt: "desc" }],
   });
 
-  res.json({ rows });
+  // A re-uploaded Brand File archives this property's row again under each
+  // sheet — keep only the most recent row per sheet (rows are already
+  // grouped by sheetName then newest-first within the group).
+  const seenSheet = new Set<string>();
+  const deduped = rows.filter((r) => {
+    if (seenSheet.has(r.sheetName)) return false;
+    seenSheet.add(r.sheetName);
+    return true;
+  });
+
+  res.json({ rows: deduped });
 });
 
 propertiesRouter.get("/:id", async (req, res) => {

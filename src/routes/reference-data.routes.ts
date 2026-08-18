@@ -24,5 +24,18 @@ referenceDataRouter.get("/", async (req, res) => {
     take: 20000,
   });
 
-  res.json({ rows });
+  // Re-uploading the same Brand File archives a fresh set of reference rows
+  // each time (no upsert on this table, unlike Properties) — a property
+  // uploaded twice shows up here twice. Since rows are already ordered
+  // newest-first, keep only the first (most recent) row per Sr. No.; rows
+  // with no Sr. No. (summary/pivot rows) have no dedup key and pass through.
+  const seenSrNo = new Set<number>();
+  const deduped = rows.filter((r) => {
+    if (r.srNo === null) return true;
+    if (seenSrNo.has(r.srNo)) return false;
+    seenSrNo.add(r.srNo);
+    return true;
+  });
+
+  res.json({ rows: deduped });
 });

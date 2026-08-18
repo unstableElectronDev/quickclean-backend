@@ -281,6 +281,8 @@ uploadsRouter.post("/:id/commit", async (req, res) => {
               roomCount: data.roomCount,
               openingYear: data.openingYear,
               capexDeployed: data.capexDeployed,
+              carbonSavingKg: data.carbonSavingKg,
+              icpModel: data.icpModel,
             };
 
             if (existing) {

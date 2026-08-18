@@ -232,6 +232,15 @@ model Property {
   roomCount       Int             @map("room_count") @db.UnsignedInt
   openingYear     Int?            @map("opening_year") @db.UnsignedSmallInt
   capexDeployed   Decimal         @default(0) @map("capex_deployed") @db.Decimal(12, 2)
+  // Real, from the Properties sheet's own "Total CO2 Emission Savings
+  // (Yearly)" column (under its "CARBON SAVINGS" banner group) — the
+  // client's own pre-computed per-property figure, in kg CO2/year. Not
+  // derived by us from an emission factor.
+  carbonSavingKg  Decimal         @default(0) @map("carbon_saving_kg") @db.Decimal(12, 2)
+  // Real, from the Properties sheet's "ICP FIT" column — a business-model
+  // classification (real values seen: "Outsourcing", "OPL"), not a
+  // fabricated or derived field.
+  icpModel        String?         @map("icp_model") @db.VarChar(50)
   // TEXT, not VARCHAR(500) — real Data Validation Link values (SharePoint/
   // OneDrive share links with tokens, etc.) routinely exceed 500 chars.
   sourceUrl       String?         @map("source_url") @db.Text

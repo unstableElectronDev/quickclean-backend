@@ -163,6 +163,12 @@ const PROPERTIES_HEADER_MAP: Record<string, string> = {
   openingyear: "openingYear",
   capextobedeployed: "capexDeployed",
   capex: "capexDeployed",
+  totalco2emissionsavingsyearly: "carbonSavingKg",
+  co2emissionsavingsyearly: "carbonSavingKg",
+  carbonsavings: "carbonSavingKg",
+  carbonsaving: "carbonSavingKg",
+  icpfit: "icpModel",
+  icp: "icpModel",
 };
 
 export type PropertyRowData = {
@@ -179,6 +185,8 @@ export type PropertyRowData = {
   roomCount: number;
   openingYear: number | null;
   capexDeployed: number;
+  carbonSavingKg: number;
+  icpModel: string | null;
 };
 
 function parsePropertiesGrid(
@@ -247,6 +255,9 @@ function parsePropertiesGrid(
       errors.push("Capex deployed cannot be negative");
     }
 
+    const carbonSavingKg = cellToNumber(fields.carbonSavingKg);
+    const icpModel = cellToString(fields.icpModel);
+
     rows.push({
       rowNumber,
       errors,
@@ -266,6 +277,8 @@ function parsePropertiesGrid(
               roomCount: roomCount!,
               openingYear,
               capexDeployed: capexDeployed ?? 0,
+              carbonSavingKg: carbonSavingKg ?? 0,
+              icpModel,
             }
           : null,
     });
