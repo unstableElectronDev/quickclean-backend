@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { requireAuth } from "../middleware/auth";
+import { getAllowedFilterKeys } from "../lib/filter-permissions";
 import type { Prisma } from "@prisma/client";
 import {
   loadBenchmarkTable,
@@ -19,6 +20,9 @@ export const dashboardRouter = Router();
 dashboardRouter.use(requireAuth);
 
 dashboardRouter.get("/overview", async (req, res) => {
+  const allowedFilters = await getAllowedFilterKeys(req.user!.role);
+  // parentGroup and brandId are scope selectors, not restrictable filters —
+  // every role needs them to pick which portfolio they're even looking at.
   const {
     parentGroup,
     brandId,
@@ -31,23 +35,30 @@ dashboardRouter.get("/overview", async (req, res) => {
     developmentType,
     icpModel,
     aging,
+    name,
   } = req.query;
 
   const where: Prisma.PropertyWhereInput = {
     ...(typeof parentGroup === "string" && parentGroup ? { brand: { parentGroup } } : {}),
     ...(typeof brandId === "string" && brandId ? { brandId: BigInt(brandId) } : {}),
-    ...(typeof region === "string" && region ? { region: region as Prisma.EnumRegionFilter["equals"] } : {}),
-    ...(typeof state === "string" && state ? { state } : {}),
-    ...(typeof city === "string" && city ? { city } : {}),
-    ...(typeof starCategory === "string" && starCategory ? { starCategory: Number(starCategory) } : {}),
-    ...(typeof operatedBy === "string" && operatedBy ? { operatedBy } : {}),
+    ...(allowedFilters.has("region") && typeof region === "string" && region
+      ? { region: region as Prisma.EnumRegionFilter["equals"] }
+      : {}),
+    ...(allowedFilters.has("state") && typeof state === "string" && state ? { state } : {}),
+    ...(allowedFilters.has("city") && typeof city === "string" && city ? { city } : {}),
+    ...(allowedFilters.has("starCategory") && typeof starCategory === "string" && starCategory
+      ? { starCategory: Number(starCategory) }
+      : {}),
+    ...(allowedFilters.has("operatedBy") && typeof operatedBy === "string" && operatedBy ? { operatedBy } : {}),
+    // propertyType isn't a gated UI filter (no dashboard control for it today) — always honored, like parentGroup/brandId.
     ...(typeof propertyType === "string" && propertyType
       ? { propertyType: propertyType as Prisma.EnumPropertyTypeFilter["equals"] }
       : {}),
-    ...(typeof developmentType === "string" && developmentType
+    ...(allowedFilters.has("developmentType") && typeof developmentType === "string" && developmentType
       ? { developmentType: developmentType as Prisma.EnumDevelopmentTypeFilter["equals"] }
       : {}),
-    ...(typeof icpModel === "string" && icpModel ? { icpModel } : {}),
+    ...(allowedFilters.has("icpModel") && typeof icpModel === "string" && icpModel ? { icpModel } : {}),
+    ...(allowedFilters.has("name") && typeof name === "string" && name ? { name } : {}),
   };
 
   const allMatching = await prisma.property.findMany({
@@ -70,7 +81,9 @@ dashboardRouter.get("/overview", async (req, res) => {
   // used on QC Operations), not a stored column, so it's filtered in
   // memory after the DB query rather than in the Prisma where clause.
   const properties =
-    typeof aging === "string" && aging ? allMatching.filter((p) => agingBucket(p.openingYear) === aging) : allMatching;
+    allowedFilters.has("aging") && typeof aging === "string" && aging
+      ? allMatching.filter((p) => agingBucket(p.openingYear) === aging)
+      : allMatching;
 
   // Load uses room_load_benchmarks (parent-group-specific row if configured,
   // else the seeded GLOBAL fallback) at an explicit 100% occupancy
@@ -273,22 +286,24 @@ dashboardRouter.get("/overview", async (req, res) => {
 // enum, so their real options depend on what's actually been uploaded for
 // this parent group.
 dashboardRouter.get("/filter-options", async (req, res) => {
+  const allowedFilters = await getAllowedFilterKeys(req.user!.role);
   const { parentGroup } = req.query;
   const where: Prisma.PropertyWhereInput =
     typeof parentGroup === "string" && parentGroup ? { brand: { parentGroup } } : {};
 
   const properties = await prisma.property.findMany({
     where,
-    select: { state: true, city: true, operatedBy: true, icpModel: true },
+    select: { state: true, city: true, operatedBy: true, icpModel: true, name: true },
   });
 
   const distinct = (values: (string | null)[]) => [...new Set(values.filter((v): v is string => !!v))].sort();
 
   res.json({
-    states: distinct(properties.map((p) => p.state)),
-    cities: distinct(properties.map((p) => p.city)),
-    operatedBy: distinct(properties.map((p) => p.operatedBy)),
-    icpModels: distinct(properties.map((p) => p.icpModel)),
+    states: allowedFilters.has("state") ? distinct(properties.map((p) => p.state)) : [],
+    cities: allowedFilters.has("city") ? distinct(properties.map((p) => p.city)) : [],
+    operatedBy: allowedFilters.has("operatedBy") ? distinct(properties.map((p) => p.operatedBy)) : [],
+    icpModels: allowedFilters.has("icpModel") ? distinct(properties.map((p) => p.icpModel)) : [],
+    names: allowedFilters.has("name") ? distinct(properties.map((p) => p.name)) : [],
   });
 });
 

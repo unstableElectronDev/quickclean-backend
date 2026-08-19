@@ -86,6 +86,31 @@ async function main() {
     },
   });
   console.log("Sample client-group benchmark ready for SAMPLE");
+
+  // Default Dashboard filter permissions — every filter open to every role
+  // (matches today's behavior) until an admin restricts one via
+  // Admin > Filter Permissions. Admin is never gated in code, so it's
+  // excluded from allowedRoles entirely.
+  const filterKeys = [
+    "parentGroup",
+    "region",
+    "state",
+    "city",
+    "starCategory",
+    "aging",
+    "operatedBy",
+    "developmentType",
+    "icpModel",
+    "name",
+  ];
+  for (const filterKey of filterKeys) {
+    await prisma.filterPermission.upsert({
+      where: { filterKey },
+      update: {},
+      create: { filterKey, allowedRoles: ["sales_head", "executive"], updatedById: admin.id },
+    });
+  }
+  console.log(`Seeded ${filterKeys.length} filter permission rows (all open by default)`);
 }
 
 main()

@@ -255,6 +255,8 @@ uploadsRouter.post("/:id/commit", async (req, res) => {
   const userId = BigInt(req.user!.id);
   let rowCount = 0;
 
+  const commitMode = z.enum(["append", "replace"]).default("append").parse(req.body?.mode);
+
   const result = await prisma.$transaction(
     async (tx) => {
       switch (pending.fileType) {
@@ -377,6 +379,9 @@ uploadsRouter.post("/:id/commit", async (req, res) => {
         }
 
         case "LEADS_PIPELINE": {
+          if (commitMode === "replace") {
+            await tx.pipelineLead.deleteMany({});
+          }
           let created = 0;
           for (const row of pending.rows) {
             if (row.errors.length > 0 || !row.data) continue;

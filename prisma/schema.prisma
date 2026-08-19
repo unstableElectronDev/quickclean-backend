@@ -123,6 +123,7 @@ model User {
   archiveRowsCreated           UploadReferenceArchive[] @relation("ArchiveCreatedBy")
   pipelineLeadsCreated         PipelineLead[]           @relation("PipelineLeadCreatedBy")
   auditLogEntries              AuditLog[]
+  filterPermissionsUpdated     FilterPermission[]       @relation("FilterPermissionUpdatedBy")
 
   @@map("users")
 }
@@ -468,4 +469,22 @@ model AuditLog {
   @@index([userId])
   @@index([entity, entityId])
   @@map("audit_log")
+}
+
+// ---------------------------------------------------------------------------
+// 11. filter_permissions  (admin-controlled, which roles can use which
+// Dashboard filters — admin itself is never gated, only sales_head/executive)
+// ---------------------------------------------------------------------------
+
+model FilterPermission {
+  id           BigInt @id @default(autoincrement())
+  filterKey    String @unique @map("filter_key") @db.VarChar(50)
+  allowedRoles Json   @map("allowed_roles")
+
+  updatedById BigInt? @map("updated_by")
+  updatedBy   User?   @relation("FilterPermissionUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("filter_permissions")
 }

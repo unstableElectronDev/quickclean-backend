@@ -12,6 +12,7 @@ import { pipelineLeadsRouter } from "./routes/pipeline-leads.routes";
 import { propertiesRouter } from "./routes/properties.routes";
 import { referenceDataRouter } from "./routes/reference-data.routes";
 import { dashboardRouter } from "./routes/dashboard.routes";
+import { filterPermissionsRouter } from "./routes/filter-permissions.routes";
 
 const app = express();
 
@@ -36,6 +37,7 @@ app.use("/api/pipeline-leads", pipelineLeadsRouter);
 app.use("/api/properties", propertiesRouter);
 app.use("/api/reference-data", referenceDataRouter);
 app.use("/api/dashboard", dashboardRouter);
+app.use("/api/filter-permissions", filterPermissionsRouter);
 
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);
